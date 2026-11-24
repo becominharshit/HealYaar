@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { SectionHero } from '../components/ui/SectionHero';
 import { SupplementsIllustration } from '../components/ContextualIllustrations';
-import { educationalSupplements } from '../data/syntheticData';
+import { educationalSupplements } from '../data/educationalReferenceData';
 import { SupplementInfo } from '../types';
 import { supabase } from '../lib/supabase';
 import { formatDisplayDate } from '../utils/healthFormatters';
@@ -43,17 +43,29 @@ interface EducationalGuidanceResult {
   whenToConsultDoctor: string[];
 }
 
+const getLocalDateKey = (d: Date = new Date()): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export const FitnessSupplementsView: React.FC = () => {
   const { showToast, currentUser } = useApp();
 
   const [supplementCategory, setSupplementCategory] = useState<'all' | 'muscle' | 'bones' | 'hair-skin' | 'general'>('all');
 
-  // Lightweight Daily Activity & Hydration Logger (per-user persisted)
-  const todayStr = new Date().toISOString().split('T')[0];
+  // Lightweight Daily Activity & Hydration Logger (per-user persisted, local browser timezone)
+  const todayStr = getLocalDateKey();
+  const todayFormatted = new Date().toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
   const [activityLogs, setActivityLogs] = useState<DailyActivityEntry[]>([]);
-  const [stepsInput, setStepsInput] = useState<number>(3500);
-  const [walkMinutesInput, setWalkMinutesInput] = useState<number>(20);
-  const [waterGlassesInput, setWaterGlassesInput] = useState<number>(4);
+  const [stepsInput, setStepsInput] = useState<number>(0);
+  const [walkMinutesInput, setWalkMinutesInput] = useState<number>(0);
+  const [waterGlassesInput, setWaterGlassesInput] = useState<number>(0);
   const [isSavingActivity, setIsSavingActivity] = useState<boolean>(false);
 
   const getActivityStorageKey = (uid: string) => `healyaar_user_${uid}_activity_logs`;
@@ -451,7 +463,7 @@ export const FitnessSupplementsView: React.FC = () => {
               <span>Daily Activity & Hydration Logger</span>
             </div>
             <h2 className="text-xl font-black text-slate-900 dark:text-white">
-              Today&apos;s Movement & Water Tracker ({formatDisplayDate(todayStr)})
+              Today&apos;s Movement &amp; Water Tracker ({todayFormatted})
             </h2>
           </div>
 

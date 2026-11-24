@@ -66,6 +66,14 @@ export interface Translations {
     cardMentalDesc: string;
     cardFitnessDesc: string;
     cardRemindersDesc: string;
+    badgeRag: string;
+    badgeSecureOcr: string;
+    badgeRxReader: string;
+    badgeNearby: string;
+    badgePrivate: string;
+    badgeAlarms: string;
+    badgeDailyLog: string;
+    openLabel: string;
   };
   actions: {
     startDemo: string;
@@ -121,7 +129,7 @@ export const translations: Record<'en' | 'hi' | 'mr', Translations> = {
     privacyBadge: 'Private & On-Device',
     privacyText: 'Your entries and health files stay isolated to your private account. Nothing is shared without your clear consent.',
     syntheticDataNotice:
-      'Demo Notice: Sample doctor listings, lab reports, prescriptions, and catalog entries are educational demonstrations.',
+      'Educational Guidance Notice: HealYaar helps explain health concepts and your uploaded personal records in plain language. Always consult a licensed doctor for diagnosis or treatment.',
     nav: {
       home: 'Home',
       assistant: 'AI Assistant',
@@ -145,13 +153,21 @@ export const translations: Record<'en' | 'hi' | 'mr', Translations> = {
       cardAssistantDesc: 'Ask health questions grounded in your private records & clinical references.',
       cardSymptomsDesc: 'Structured symptom triage with red-flag emergency checks.',
       cardReportsDesc: 'Upload blood tests or lab PDFs for plain-language explanations.',
-      cardMedicinesDesc: 'Scan prescriptions, verify dosages, and find nearby pharmacies.',
+      cardMedicinesDesc: 'Scan prescriptions, verify dosages, and track prescribed medicines.',
       cardNutritionDesc: 'Analyze Indian meals, household portions, and balanced thalis.',
       cardPeriodDesc: 'Private menstrual cycle tracking, phase insights, and symptom logs.',
-      cardDoctorsDesc: 'Locate verified regional clinics and specialists near you.',
+      cardDoctorsDesc: 'Locate real clinics, hospitals, and specialists near you on an interactive map.',
       cardMentalDesc: 'Guided breathing exercises, stress relief, and 14416 helpline support.',
       cardFitnessDesc: 'Daily steps & hydration tracker, gentle workouts, and supplement safety.',
-      cardRemindersDesc: 'Set reliable pill schedules and doctor appointment alerts.'
+      cardRemindersDesc: 'Set reliable pill schedules and doctor appointment alerts.',
+      badgeRag: 'Dual-Layer RAG',
+      badgeSecureOcr: 'Secure OCR',
+      badgeRxReader: 'Rx Reader',
+      badgeNearby: 'Live Map',
+      badgePrivate: 'Private',
+      badgeAlarms: 'Alarms',
+      badgeDailyLog: 'Daily Log',
+      openLabel: 'Open'
     },
     actions: {
       startDemo: 'Try Sample Journey',
@@ -206,7 +222,7 @@ export const translations: Record<'en' | 'hi' | 'mr', Translations> = {
     privacyText:
       'आपकी स्वास्थ्य जानकारी आपके निजी खाते में ही सुरक्षित रहती है। आपकी अनुमति के बिना कहीं नहीं भेजी जाती।',
     syntheticDataNotice:
-      'डेमो सूचना: सभी नमूना डॉक्टर सूची, लैब रिपोर्ट और दवाएं केवल समझने के लिए काल्पनिक (डेमो) हैं।',
+      'शैक्षिक मार्गदर्शन सूचना: हीलयार आपकी अपलोड की गई निजी रिपोर्ट और स्वास्थ्य जानकारी को सरल भाषा में समझाने में मदद करता है। निदान व उपचार के लिए हमेशा डॉक्टर से परामर्श करें।',
     nav: {
       home: 'होम',
       assistant: 'एआई साथी',
@@ -230,13 +246,21 @@ export const translations: Record<'en' | 'hi' | 'mr', Translations> = {
       cardAssistantDesc: 'अपनी रिपोर्ट और चिकित्सा संदर्भ के साथ सरल भाषा में प्रश्न पूछें।',
       cardSymptomsDesc: 'लक्षणों की जांच और आपातकालीन चेतावनी संकेतों की पहचान।',
       cardReportsDesc: 'खून की जांच या लैब रिपोर्ट अपलोड करें और आसान भाषा में समझें।',
-      cardMedicinesDesc: 'डॉक्टर की पर्ची स्कैन करें, खुराक जांचें और पास की फार्मेसी खोजें।',
+      cardMedicinesDesc: 'डॉक्टर की पर्ची स्कैन करें, खुराक जांचें और अपनी दवाएं सहेजें।',
       cardNutritionDesc: 'भारतीय भोजन, कटोरी-रोटी कैलोरी और संतुलित थाली का विश्लेषण करें।',
       cardPeriodDesc: 'गोपनीय मासिक धर्म चक्र ट्रैकर, चरण जानकारी और लक्षण लॉग।',
-      cardDoctorsDesc: 'अपने आस-पास के विशेषज्ञ डॉक्टर और क्लिनिक खोजें।',
+      cardDoctorsDesc: 'इंटरैक्टिव मानचित्र पर अपने पास के वास्तविक क्लिनिक और अस्पताल खोजें।',
       cardMentalDesc: 'शांत श्वास अभ्यास, तनाव प्रबंधन और 14416 हेल्पलाइन सहायता।',
       cardFitnessDesc: 'दैनिक कदम व पानी ट्रैकर, सरल व्यायाम और सप्लीमेंट सुरक्षा जानकारी।',
-      cardRemindersDesc: 'दवाओं और डॉक्टर अपॉइंटमेंट के लिए समय पर अलार्म सेट करें।'
+      cardRemindersDesc: 'दवाओं और डॉक्टर अपॉइंटमेंट के लिए समय पर अलार्म सेट करें।',
+      badgeRag: 'डुअल-लेयर RAG',
+      badgeSecureOcr: 'सुरक्षित OCR',
+      badgeRxReader: 'पर्ची स्कैनर',
+      badgeNearby: 'लाइव मैप',
+      badgePrivate: 'गोपनीय',
+      badgeAlarms: 'अलार्म',
+      badgeDailyLog: 'दैनिक लॉग',
+      openLabel: 'खोलें'
     },
     actions: {
       startDemo: 'नमूना यात्रा शुरू करें',
@@ -289,7 +313,7 @@ export const translations: Record<'en' | 'hi' | 'mr', Translations> = {
       'हीलयार (HealYaar) हे केवळ आरोग्य माहिती समजून घेण्यासाठी आहे. हा वैद्यकीय सल्ला किंवा डॉक्टरचा पर्याय नाही.',
     privacyBadge: 'खाजगी आणि सुरक्षित',
     privacyText: 'तुमची आरोग्य माहिती तुमच्याच खात्यात सुरक्षित राहते. ती कोठेही पाठवली जात नाही.',
-    syntheticDataNotice: 'डेमो माहिती: सर्व नमुना डॉक्टर, लॅब रिपोर्ट्स आणि औषधे केवळ उदाहरणासाठी (डेमो) आहेत.',
+    syntheticDataNotice: 'शैक्षणिक मार्गदर्शन सूचना: हीलयार तुमचे अपलोड केलेले वैयक्तिक अहवाल आणि आरोग्य माहिती सोप्या भाषेत समजण्यास मदत करते.',
     nav: {
       home: 'मुख्य पान',
       assistant: 'एआय सहाय्यक',
@@ -316,15 +340,23 @@ export const translations: Record<'en' | 'hi' | 'mr', Translations> = {
       cardMedicinesDesc: 'डॉक्टरांचे प्रिस्क्रिप्शन स्कॅन करा आणि औषधे तपासा.',
       cardNutritionDesc: 'भारतीय जेवण, पोषणमूल्ये आणि संतुलित थाळी विश्लेषण.',
       cardPeriodDesc: 'खाजगी मासिक पाळी ट्रॅकर आणि लक्षणांची नोंद.',
-      cardDoctorsDesc: 'तुमच्या जवळचे तज्ञ डॉक्टर आणि क्लिनिक शोधा.',
+      cardDoctorsDesc: 'इंटरॅक्टिव्ह नकाशावर जवळचे वास्तविक क्लिनिक व रुग्णालये शोधा.',
       cardMentalDesc: 'श्वासोच्छवासाचे व्यायाम आणि 14416 मानसिक आरोग्य मदत.',
       cardFitnessDesc: 'दैनिक चालणे व पाणी नोंद, हलके व्यायाम आणि सप्लिमेंट माहिती.',
-      cardRemindersDesc: 'औषधे आणि डॉक्टर भेटींसाठी वेळेवर आठवण.'
+      cardRemindersDesc: 'औषधे आणि डॉक्टर भेटींसाठी वेळेवर आठवण.',
+      badgeRag: 'डुअल-लेयर RAG',
+      badgeSecureOcr: 'सुरक्षित OCR',
+      badgeRxReader: 'प्रिस्क्रिप्शन रीडर',
+      badgeNearby: 'लाइव्ह नकाशा',
+      badgePrivate: 'खाजगी',
+      badgeAlarms: 'अलार्म',
+      badgeDailyLog: 'दैनिक नोंद',
+      openLabel: 'उघडा'
     },
     actions: {
-      startDemo: 'डेमो अनुभव सुरू करा',
+      startDemo: 'प्रवास सुरू करा',
       findDoctor: 'योग्य डॉक्टर शोधा',
-      viewSample: 'नमुना अहवाल पहा',
+      viewSample: 'अहवाल पहा',
       uploadFile: 'फाइल अपलोड करा',
       calculate: 'अंदाज काढा',
       save: 'जतन करा',
@@ -340,20 +372,7 @@ export const translations: Record<'en' | 'hi' | 'mr', Translations> = {
 export const languageOptions: { code: SupportedLanguage; shortLabel: string; nativeName: string; englishName: string; langCode: string }[] = [
   { code: 'en', shortLabel: 'EN', nativeName: 'English', englishName: 'English', langCode: 'en-IN' },
   { code: 'hi', shortLabel: 'HI', nativeName: 'हिन्दी', englishName: 'Hindi', langCode: 'hi-IN' },
-  { code: 'mr', shortLabel: 'MR', nativeName: 'मराठी', englishName: 'Marathi', langCode: 'mr-IN' },
-  { code: 'ta', shortLabel: 'TA', nativeName: 'தமிழ்', englishName: 'Tamil', langCode: 'ta-IN' },
-  { code: 'te', shortLabel: 'TE', nativeName: 'తెలుగు', englishName: 'Telugu', langCode: 'te-IN' },
-  { code: 'bn', shortLabel: 'BN', nativeName: 'বাংলা', englishName: 'Bengali', langCode: 'bn-IN' },
-  { code: 'gu', shortLabel: 'GU', nativeName: 'ગુજરાતી', englishName: 'Gujarati', langCode: 'gu-IN' }
-];
-
-export const regionalOptions = [
-  { code: 'hi', name: 'हिन्दी (Hindi)', langCode: 'hi-IN' },
-  { code: 'mr', name: 'मराठी (Marathi)', langCode: 'mr-IN' },
-  { code: 'ta', name: 'தமிழ் (Tamil)', langCode: 'ta-IN' },
-  { code: 'te', name: 'తెలుగు (Telugu)', langCode: 'te-IN' },
-  { code: 'bn', name: 'বাংলা (Bengali)', langCode: 'bn-IN' },
-  { code: 'gu', name: 'ગુજરાતી (Gujarati)', langCode: 'gu-IN' }
+  { code: 'mr', shortLabel: 'MR', nativeName: 'मराठी', englishName: 'Marathi', langCode: 'mr-IN' }
 ];
 
 /**

@@ -391,6 +391,44 @@ CREATE POLICY "Users can delete their own consent records"
   USING (auth.uid() = user_id);
 
 -- =============================================================================
+-- 7e. FAVORITE CLINICS, HOSPITALS & DOCTORS (Per-User Saved Real Places)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS public.favorite_places (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  place_name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Healthcare',
+  address TEXT NOT NULL DEFAULT '',
+  lat DOUBLE PRECISION NOT NULL,
+  lng DOUBLE PRECISION NOT NULL,
+  maps_url TEXT NOT NULL DEFAULT '',
+  phone TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_favorite_places_user ON public.favorite_places(user_id, created_at DESC);
+
+ALTER TABLE public.favorite_places ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own favorite places"
+  ON public.favorite_places FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own favorite places"
+  ON public.favorite_places FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own favorite places"
+  ON public.favorite_places FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own favorite places"
+  ON public.favorite_places FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- =============================================================================
 -- 8. STORAGE BUCKETS CONFIGURATION (Private & Secure)
 -- =============================================================================
 -- Insert storage buckets if storage schema exists

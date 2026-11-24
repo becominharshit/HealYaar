@@ -51,7 +51,7 @@ export const CookieConsentBanner: React.FC = () => {
         <aside
           role="region"
           aria-label="Cookie and essential storage notice"
-          className="fixed bottom-4 left-4 right-4 sm:right-auto sm:max-w-md z-40 animate-fade-in"
+          className="fixed bottom-4 right-4 left-4 sm:left-auto sm:max-w-sm z-40 animate-fade-in"
         >
           <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-3 sm:p-4 space-y-2.5">
             <div className="flex items-start gap-2.5">

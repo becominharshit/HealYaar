@@ -33,13 +33,13 @@ const DEFAULT_WELCOME_MESSAGE: ChatMessage = {
   id: 'msg-welcome',
   sender: 'assistant',
   copilotMode: 'patient',
-  text: "**Namaste!** I am HealYaar, your accessible health friend. You can describe any symptom, ask about a medical term, or discuss lab test results in simple everyday words.\n\nMy responses are grounded in your private **Health Knowledge Vault** and verified **clinical guidelines**. Switch to **Clinician Copilot Mode** above to generate verifiable **SOAP Notes** with differential considerations and interaction checks.",
+  text: "**Namaste!** I am HealYaar, your accessible health friend. You can describe any symptom, ask about a medical term, or discuss your uploaded lab reports in simple everyday words.\n\nMy responses are grounded in your private **Health Knowledge Vault** and verified **clinical guidelines**. Switch to **Clinician Copilot Mode** above to generate verifiable **SOAP Notes** with differential considerations and interaction checks.",
   timestamp: 'Just now',
   suggestedFollowUps: [
-    "What does my hemoglobin level indicate and what foods help absorption?",
+    "Explain what HbA1c measures in simple terms",
     "What does 'borderline high cholesterol' mean?",
-    "Home care for mild fever and cold",
-    "Why does my left knee ache after walking?"
+    "Home care steps for mild fever and hydration",
+    "Questions to ask my doctor about knee stiffness"
   ],
   uncertaintyNote: "General health education only. I cannot diagnose diseases or replace your doctor."
 };
@@ -64,6 +64,7 @@ export const AssistantView: React.FC = () => {
   const [vaultChunkCount, setVaultChunkCount] = useState(0);
   const [copilotMode, setCopilotMode] = useState<'patient' | 'clinician'>('patient');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const getStorageKey = () => `healyaar_user_${currentUser?.id || 'anonymous'}_chat_history`;
 
@@ -187,17 +188,6 @@ export const AssistantView: React.FC = () => {
     );
   };
 
-  const loadSampleJourney = () => {
-    if (copilotMode === 'clinician') {
-      void handleUserSubmit(
-        "45yo female with fatigue, hemoglobin 10.2 g/dL, and morning knee stiffness — summarize differentials and iron interaction precautions.",
-        'clinician'
-      );
-    } else {
-      void handleUserSubmit("What does my hemoglobin level indicate and what foods help absorption?", 'patient');
-    }
-  };
-
   const handleResetChat = () => {
     setMessages([DEFAULT_WELCOME_MESSAGE]);
     if (currentUser?.id) {
@@ -230,15 +220,6 @@ export const AssistantView: React.FC = () => {
               <span className="px-1.5 py-0.5 rounded-full text-[11px] bg-emerald-200 dark:bg-emerald-800 font-bold text-emerald-900 dark:text-emerald-100">
                 {vaultChunkCount}
               </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={loadSampleJourney}
-              className="interactive-button px-3.5 py-2 bg-teal-50 dark:bg-teal-950/40 hover:bg-teal-100 dark:hover:bg-teal-900/60 border border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-300 rounded-xl font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition-colors shadow-xs"
-            >
-              <Sparkles className="w-4 h-4 text-teal-600 dark:text-teal-400" aria-hidden="true" />
-              <span>{copilotMode === 'clinician' ? 'Sample SOAP Case' : 'Sample Question'}</span>
             </button>
 
             <button
@@ -581,9 +562,15 @@ export const AssistantView: React.FC = () => {
                 )}
               </div>
 
-              {/* Message Footer: Timestamp & Audio Read-Aloud Button */}
-              <div className="flex items-center gap-3 px-2 text-xs text-slate-500 dark:text-slate-400">
+              {/* Message Footer: Timestamp, Powered By Badge & Audio Read-Aloud Button */}
+              <div className="flex flex-wrap items-center gap-3 px-2 text-xs text-slate-500 dark:text-slate-400">
                 <span>{msg.timestamp}</span>
+                {!isUser && msg.poweredBy && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold text-[11px]">
+                    <Sparkles className="w-3 h-3 text-teal-600 dark:text-teal-400" aria-hidden="true" />
+                    <span>Powered by {msg.poweredBy}</span>
+                  </span>
+                )}
                 {!isUser && (
                   <button
                     type="button"
@@ -607,15 +594,18 @@ export const AssistantView: React.FC = () => {
                 )}
               </div>
 
-              {/* Suggested Follow-Up Prompt Pills */}
+              {/* Suggested Prompt Chips (Click fills input box only — never pre-injects fake medical history) */}
               {msg.suggestedFollowUps && (
                 <div className="flex flex-wrap gap-2 pt-2 max-w-2xl">
                   {msg.suggestedFollowUps.map((prompt, pIdx) => (
                     <button
                       type="button"
                       key={pIdx}
-                      onClick={() => void handleUserSubmit(prompt)}
-                      className="interactive-button px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold bg-white dark:bg-slate-800 hover:bg-teal-50 dark:hover:bg-teal-950/50 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 shadow-xs transition-all"
+                      onClick={() => {
+                        setInputQuery(prompt);
+                        inputRef.current?.focus();
+                      }}
+                      className="interactive-button px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold bg-white dark:bg-slate-800 hover:bg-teal-50 dark:hover:bg-teal-950/50 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 shadow-xs transition-all text-left"
                     >
                       {prompt}
                     </button>
@@ -628,7 +618,7 @@ export const AssistantView: React.FC = () => {
 
         {isTyping && (
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm italic pl-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-teal-500 animate-ping" aria-hidden="true" />
+            <Sparkles className="w-4 h-4 text-teal-600 animate-spin flex-shrink-0" aria-hidden="true" />
             <span>
               {copilotMode === 'clinician'
                 ? 'Clinician Copilot is synthesizing Dual-Layer RAG evidence and drafting SOAP Note...'
@@ -652,6 +642,7 @@ export const AssistantView: React.FC = () => {
           Ask a health question
         </label>
         <input
+          ref={inputRef}
           id="assistant-query-input"
           type="text"
           value={inputQuery}

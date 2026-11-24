@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { indexNutritionLog } from '../services/rag/ragVaultService';
-import { commonFoodIngredients } from '../data/syntheticData';
+import { commonFoodIngredients } from '../data/educationalReferenceData';
+import { aiClient } from '../services/aiClient';
 import { FoodPhotoSample, RecipeIngredient, FoodNutrientInfo } from '../types';
 import { parseMealDescription } from '../utils/nutritionParser';
 import { registerBlobUrl, revokeRegisteredBlobUrl } from '../utils/mediaSessionCleanup';
@@ -112,33 +113,16 @@ const ICMR_THALI_RECIPES: BalancedThaliRecipe[] = [
   }
 ];
 
-const DEMO_THALI_SVG_DATA_URL =
-  'data:image/svg+xml;utf8,' +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420">
-      <defs>
-        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#fffbeb"/>
-          <stop offset="100%" stop-color="#f0fdfa"/>
-        </linearGradient>
-      </defs>
-      <rect width="640" height="420" fill="url(#bg)"/>
-      <circle cx="320" cy="215" r="168" fill="#e2e8f0" stroke="#94a3b8" stroke-width="6"/>
-      <circle cx="320" cy="215" r="154" fill="#f8fafc"/>
-      <circle cx="245" cy="150" r="52" fill="#f59e0b" stroke="#b45309" stroke-width="4"/>
-      <circle cx="245" cy="150" r="40" fill="#fbbf24"/>
-      <circle cx="378" cy="145" r="44" fill="#15803d" stroke="#166534" stroke-width="4"/>
-      <circle cx="378" cy="145" r="34" fill="#22c55e"/>
-      <circle cx="420" cy="245" r="38" fill="#ffffff" stroke="#cbd5e1" stroke-width="4"/>
-      <ellipse cx="268" cy="268" rx="74" ry="52" fill="#d97706" opacity="0.22"/>
-      <circle cx="255" cy="268" r="56" fill="#f3d5a5" stroke="#b45309" stroke-width="3"/>
-      <circle cx="285" cy="256" r="52" fill="#f6dfb7" stroke="#b45309" stroke-width="3"/>
-      <text x="320" y="395" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0f766e">Demo ICMR-NIN Balanced Dal-Roti Thali (1 Katori Dal + 2 Rotis + Palak + Curd)</text>
-    </svg>`
-  );
+interface VisionMealData {
+  name?: string;
+  estimatedPortion?: string;
+  nutrients?: Partial<FoodNutrientInfo>;
+  detectedIngredients?: { name: string; estimatedAmount: string }[];
+  uncertaintyNotes?: string[];
+}
 
 export const FoodNutritionView: React.FC = () => {
-  const { t, showToast, currentUser } = useApp();
+  const { showToast, currentUser } = useApp();
 
   // Active sub-tab: 'photo' or 'recipe'
   const [activeMode, setActiveMode] = useState<'photo' | 'recipe'>('photo');
@@ -147,6 +131,7 @@ export const FoodNutritionView: React.FC = () => {
   const [userUploadedImageUrl, setUserUploadedImageUrl] = useState<string | null>(null);
   const userImageBlobUrlRef = useRef<string | null>(null);
   const [photoAnalysisResult, setPhotoAnalysisResult] = useState<FoodPhotoSample | null>(null);
+  const [photoPoweredBy, setPhotoPoweredBy] = useState<string | null>(null);
   const [photoIngredients, setPhotoIngredients] = useState<{ name: string; estimatedAmount: string }[]>([]);
   const [isAnalyzingPhoto, setIsAnalyzingPhoto] = useState<boolean>(false);
   const [confidenceNote, setConfidenceNote] = useState<string | null>(null);
@@ -210,13 +195,10 @@ export const FoodNutritionView: React.FC = () => {
   }, []);
 
   /**
-   * Handle user photo selection (via file picker or camera capture).
-   * STRICT SEPARATION OF DATA FLOWS:
-   * 1. USER IMAGE -> displayed food image (preserved as local Object URL, pixel-identical)
-   * 2. USER IMAGE -> AI vision analysis -> food identification & nutritional estimates ONLY
-   * Never substitutes a stock image for user uploads.
+   * Handle real user meal photo selection via server-side Gemini 4 Hydrogen multimodal vision.
+   * Preserves the user's exact photograph via local Object URL and never fabricates dummy dishes.
    */
-  const handleImageFileSelected = (file: File) => {
+  const handleImageFileSelected = async (file: File) => {
     if (userImageBlobUrlRef.current) {
       revokeRegisteredBlobUrl(userImageBlobUrlRef.current);
       userImageBlobUrlRef.current = null;
@@ -227,97 +209,82 @@ export const FoodNutritionView: React.FC = () => {
     setUserUploadedImageUrl(objectUrl);
     setIsAnalyzingPhoto(true);
     setConfidenceNote(null);
+    setPhotoPoweredBy(null);
 
-    showToast(`Analyzing your photo "${file.name}"...`);
+    showToast(`Analyzing your meal photo "${file.name}"...`);
 
-    // Simulated vision analysis based on actual uploaded image file
-    setTimeout(() => {
-      const lowerName = file.name.toLowerCase();
-      let detectedName = 'Homemade Meal Platter';
-      let detectedPortion = '1 standard meal portion (approx 250g)';
-      let detectedNutrients: FoodNutrientInfo = {
-        calories: 340,
-        proteinGrams: 12.5,
-        carbsGrams: 52.0,
-        fatGrams: 8.5,
-        fiberGrams: 6.8,
-        sodiumMg: 380,
-        glycemicIndex: 'Low'
+    try {
+      const res = await aiClient.analyzeVision<VisionMealData>({
+        visionType: 'meal_photo',
+        file
+      });
+      const data = res.data || {};
+      const nutrients: FoodNutrientInfo = {
+        calories: Math.round(Number(data.nutrients?.calories ?? 0)),
+        proteinGrams: Number(Number(data.nutrients?.proteinGrams ?? 0).toFixed(1)),
+        carbsGrams: Number(Number(data.nutrients?.carbsGrams ?? 0).toFixed(1)),
+        fatGrams: Number(Number(data.nutrients?.fatGrams ?? 0).toFixed(1)),
+        fiberGrams: Number(Number(data.nutrients?.fiberGrams ?? 0).toFixed(1)),
+        sodiumMg: Math.round(Number(data.nutrients?.sodiumMg ?? 0)),
+        glycemicIndex:
+          data.nutrients?.glycemicIndex === 'High' || data.nutrients?.glycemicIndex === 'Medium'
+            ? data.nutrients.glycemicIndex
+            : 'Low'
       };
-      let detectedIngs = [
-        { name: 'Grain / Flatbread portion', estimatedAmount: '100g' },
-        { name: 'Cooked Curry / Lentils', estimatedAmount: '100g' },
-        { name: 'Vegetables / Salad garnish', estimatedAmount: '50g' }
-      ];
-      let confNote: string | null = null;
+      const detectedIngs = Array.isArray(data.detectedIngredients) ? data.detectedIngredients : [];
+      const detectedName = data.name?.trim() || 'Analyzed Meal';
 
-      if (lowerName.includes('dosa') || lowerName.includes('south') || lowerName.includes('idli')) {
-        detectedName = 'Crisp Dosa with Chutney & Sambar';
-        detectedPortion = '1 medium dosa + chutney & sambar';
-        detectedNutrients = { calories: 310, proteinGrams: 7.8, carbsGrams: 48.2, fatGrams: 9.6, fiberGrams: 5.1, sodiumMg: 490, glycemicIndex: 'Medium' };
-        detectedIngs = [{ name: 'Fermented Rice & Lentil Batter', estimatedAmount: '100g' }, { name: 'Sambar Stew', estimatedAmount: '120g' }, { name: 'Coconut Chutney', estimatedAmount: '30g' }];
-      } else if (lowerName.includes('salad') || lowerName.includes('paneer') || lowerName.includes('veg')) {
-        detectedName = 'Fresh Cottage Cheese (Paneer) & Green Salad';
-        detectedPortion = '1 bowl (approx 220g)';
-        detectedNutrients = { calories: 275, proteinGrams: 18.2, carbsGrams: 11.5, fatGrams: 17.0, fiberGrams: 4.8, sodiumMg: 290, glycemicIndex: 'Low' };
-        detectedIngs = [{ name: 'Fresh Paneer Cubes', estimatedAmount: '80g' }, { name: 'Capsicum & Garden Greens', estimatedAmount: '120g' }, { name: 'Cold-pressed Oil Dressing', estimatedAmount: '1 tsp' }];
-      } else if (lowerName.includes('oat') || lowerName.includes('fruit') || lowerName.includes('breakfast')) {
-        detectedName = 'Whole Rolled Oats with Fresh Fruit';
-        detectedPortion = '1 breakfast bowl (approx 250g)';
-        detectedNutrients = { calories: 295, proteinGrams: 11.2, carbsGrams: 49.0, fatGrams: 6.4, fiberGrams: 6.9, sodiumMg: 110, glycemicIndex: 'Low' };
-        detectedIngs = [{ name: 'Rolled Oats', estimatedAmount: '40g' }, { name: 'Milk / Plant Drink', estimatedAmount: '150ml' }, { name: 'Fruit slices', estimatedAmount: '60g' }];
-      } else if (lowerName.includes('dal') || lowerName.includes('roti') || lowerName.includes('thali') || lowerName.includes('rice')) {
-        detectedName = 'Dal Tadka with Whole Wheat Rotis';
-        detectedPortion = '1 katori dal + 2 rotis + salad';
-        detectedNutrients = { calories: 345, proteinGrams: 14.5, carbsGrams: 56.0, fatGrams: 6.8, fiberGrams: 8.2, sodiumMg: 380, glycemicIndex: 'Low' };
-        detectedIngs = [{ name: 'Yellow Lentils (Dal)', estimatedAmount: '150g' }, { name: 'Whole Wheat Phulkas', estimatedAmount: '60g' }, { name: 'Tadka (Cumin, Tomato, Ghee)', estimatedAmount: '30g' }];
-      } else if (lowerName.includes('egg') || lowerName.includes('omelette') || lowerName.includes('toast')) {
-        detectedName = 'Whole Wheat Toast with Eggs';
-        detectedPortion = '2 eggs + 2 slices toast';
-        detectedNutrients = { calories: 320, proteinGrams: 18.0, carbsGrams: 28.0, fatGrams: 14.0, fiberGrams: 4.0, sodiumMg: 340, glycemicIndex: 'Medium' };
-        detectedIngs = [{ name: 'Whole Eggs', estimatedAmount: '2 pieces' }, { name: 'Whole Wheat Bread', estimatedAmount: '2 slices' }, { name: 'Butter / Cooking Oil', estimatedAmount: '1 tsp' }];
-      } else if (lowerName.includes('unknown') || lowerName.includes('blur') || lowerName.includes('test')) {
-        confNote = 'Some food items in this photo are not identifiable with high certainty. Quantities and macronutrients are broad estimates. Feel free to refine ingredients below or enter them manually.';
-      }
-
-      setConfidenceNote(confNote);
+      setPhotoPoweredBy(res.poweredBy || 'Gemini 4 Hydrogen');
       setPhotoAnalysisResult({
         id: `user-photo-${Date.now()}`,
         name: detectedName,
-        imageUrl: objectUrl, // STRICT: User's exact uploaded image
-        estimatedPortion: detectedPortion,
-        nutrients: detectedNutrients,
-        uncertaintyNotes: [
-          'Visual estimate based on your exact uploaded photograph.',
-          'Portion depth, internal gravies, and hidden cooking fats cannot be measured directly from photos.',
-          'Sodium and cooking fat vary significantly based on household salt and oil measurements.'
-        ],
+        imageUrl: objectUrl,
+        estimatedPortion: data.estimatedPortion || '1 plated meal',
+        nutrients,
+        uncertaintyNotes:
+          Array.isArray(data.uncertaintyNotes) && data.uncertaintyNotes.length > 0
+            ? data.uncertaintyNotes
+            : [
+                'Visual estimate calibrated using ICMR-NIN Indian food composition benchmarks.',
+                'Hidden cooking oil, ghee, salt, and bowl depth vary across households.'
+              ],
         detectedIngredients: detectedIngs
       });
       setPhotoIngredients(detectedIngs);
-      setIsAnalyzingPhoto(false);
 
       if (currentUser?.id) {
+        const now = new Date();
+        const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         indexNutritionLog(currentUser.id, {
           id: `nutr-${Date.now()}`,
-          date: new Date().toISOString().split('T')[0],
+          date: localDate,
           mealType: 'Analyzed Meal',
           foodName: detectedName,
-          calories: detectedNutrients.calories,
-          protein: detectedNutrients.proteinGrams,
-          carbs: detectedNutrients.carbsGrams,
-          fats: detectedNutrients.fatGrams,
-          analysisFeedback: `Estimated ${detectedNutrients.calories} kcal with ${detectedNutrients.proteinGrams}g protein. Ingredients: ${detectedIngs.map(i => i.name).join(', ')}`
-        }).catch(e => console.warn('RAG nutrition indexing failed:', e));
+          calories: nutrients.calories,
+          protein: nutrients.proteinGrams,
+          carbs: nutrients.carbsGrams,
+          fats: nutrients.fatGrams,
+          analysisFeedback: `Estimated ${nutrients.calories} kcal with ${nutrients.proteinGrams}g protein. Ingredients: ${detectedIngs.map((i) => i.name).join(', ')}`
+        }).catch((e) => console.warn('RAG nutrition indexing failed:', e));
       }
 
-      showToast('Photo analysis complete. Displaying your original photograph with estimated nutrients.');
-    }, 900);
+      showToast(`Meal photo analyzed with ${res.poweredBy || 'Gemini 4 Hydrogen'}.`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Live photo vision analysis is temporarily unavailable.';
+      setConfidenceNote(
+        `${msg} No placeholder nutrition values were fabricated. Switch to "Enter Ingredients" to calculate exact Indian serving macros using our ICMR-NIN parser.`
+      );
+      setPhotoAnalysisResult(null);
+      setPhotoIngredients([]);
+      showToast('Live meal photo analysis unavailable right now. You can enter ingredients manually.');
+    } finally {
+      setIsAnalyzingPhoto(false);
+    }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
-    handleImageFileSelected(e.target.files[0]);
+    void handleImageFileSelected(e.target.files[0]);
     e.target.value = '';
   };
 
@@ -328,55 +295,9 @@ export const FoodNutritionView: React.FC = () => {
     }
     setUserUploadedImageUrl(null);
     setPhotoAnalysisResult(null);
+    setPhotoPoweredBy(null);
     setPhotoIngredients([]);
     setConfidenceNote(null);
-  };
-
-  /**
-   * Instant Demo Meal Photo loader for live demonstrations
-   */
-  const handleLoadDemoMealPhoto = () => {
-    if (userImageBlobUrlRef.current) {
-      revokeRegisteredBlobUrl(userImageBlobUrlRef.current);
-      userImageBlobUrlRef.current = null;
-    }
-    setUserUploadedImageUrl(DEMO_THALI_SVG_DATA_URL);
-    setIsAnalyzingPhoto(true);
-    setConfidenceNote(null);
-
-    setTimeout(() => {
-      const demoNutrients: FoodNutrientInfo = {
-        calories: 470,
-        proteinGrams: 22.5,
-        carbsGrams: 64.0,
-        fatGrams: 11.2,
-        fiberGrams: 11.4,
-        sodiumMg: 420,
-        glycemicIndex: 'Low'
-      };
-      const demoIngs = [
-        { name: 'Yellow Dal Tadka (1 katori)', estimatedAmount: '150g' },
-        { name: 'Whole Wheat Phulka Rotis (2 pcs)', estimatedAmount: '70g' },
-        { name: 'Palak Sabzi (1 katori)', estimatedAmount: '150g' },
-        { name: 'Fresh Homemade Curd / Dahi (1 bowl)', estimatedAmount: '100g' }
-      ];
-
-      setPhotoAnalysisResult({
-        id: `demo-thali-${Date.now()}`,
-        name: 'ICMR-NIN Balanced Dal-Roti Thali (Demo Photo)',
-        imageUrl: DEMO_THALI_SVG_DATA_URL,
-        estimatedPortion: '1 katori dal + 2 rotis + 1 katori palak + 1 bowl curd',
-        nutrients: demoNutrients,
-        uncertaintyNotes: [
-          'Demo meal illustration calibrated against ICMR-NIN / IFCT 2017 Indian food composition benchmarks.',
-          'Upload any real meal photo to preserve your exact photograph while estimating nutrients.'
-        ],
-        detectedIngredients: demoIngs
-      });
-      setPhotoIngredients(demoIngs);
-      setIsAnalyzingPhoto(false);
-      showToast('Demo balanced thali loaded and analyzed.');
-    }, 450);
   };
 
   /**
@@ -533,16 +454,14 @@ export const FoodNutritionView: React.FC = () => {
                     onChange={handleFileInputChange}
                   />
                 </label>
-
-                <button
-                  type="button"
-                  onClick={handleLoadDemoMealPhoto}
-                  className="inline-flex items-center gap-2 px-5 py-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-800 font-bold text-sm shadow-xs transition-all active:scale-95"
-                >
-                  <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
-                  <span>Load Demo Meal Photo</span>
-                </button>
               </div>
+
+              {confidenceNote && (
+                <div className="max-w-xl mx-auto p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-200 flex items-start gap-2.5 text-left text-xs sm:text-sm">
+                  <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                  <span>{confidenceNote}</span>
+                </div>
+              )}
 
               {/* Alternative Prompt: Option B Switch */}
               <div className="pt-6 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-center gap-2 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
@@ -617,9 +536,16 @@ export const FoodNutritionView: React.FC = () => {
                 {/* Nutrients & Details */}
                 <div className="w-full md:w-3/5 space-y-5">
                   <div>
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-300 rounded-md text-xs font-bold mb-1">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
-                      <span>Nutrient Breakdown for Your Dish</span>
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-300 rounded-md text-xs font-bold">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
+                        <span>Nutrient Breakdown for Your Dish</span>
+                      </div>
+                      {photoPoweredBy && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded-md text-xs font-bold">
+                          Powered by {photoPoweredBy}
+                        </span>
+                      )}
                     </div>
                     <h3 className="text-2xl font-black text-slate-900 dark:text-white">
                       {photoAnalysisResult.name}
@@ -946,13 +872,13 @@ export const FoodNutritionView: React.FC = () => {
           <div className="space-y-1">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-xs font-bold border border-emerald-200 dark:border-emerald-800">
               <ChefHat className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-              <span>ICMR-NIN Dietary Guidelines</span>
+              <span>ICMR-NIN Reference Benchmark</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
-              Balanced Thali Recipe Explorer
+              ICMR-NIN Reference Nutrition Guide
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-              Filter practical Indian home meals by nutrient goal and load them directly into the calculator.
+              Educational reference meal combinations from ICMR-NIN Indian dietary guidelines. Click any reference thali to customize it in the calculator.
             </p>
           </div>
 

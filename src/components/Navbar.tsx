@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { NavTab, SupportedLanguage } from '../types';
 import { languageOptions } from '../i18n/translations';
-import { VOICE_LONG_PRESS_MS } from '../context/VoiceAssistantContext';
+import { useVoiceAssistant, VOICE_LONG_PRESS_MS } from '../context/VoiceAssistantContext';
 import { Tooltip } from './ui/Tooltip';
 import { isSafeAvatarUrl } from '../services/oauthPopupHelpers';
 import {
@@ -53,9 +53,10 @@ export const Navbar: React.FC = () => {
     logout,
     openEmergencyModal,
     isListening,
-    startVoiceListening,
     stopVoiceListening
   } = useApp();
+  const { isAssistantActive, activateAssistant, deactivateAssistant } = useVoiceAssistant();
+  const voiceActive = isAssistantActive || isListening;
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [langDropdownOpen, setLangDropdownOpen] = useState(false);
@@ -81,10 +82,12 @@ export const Navbar: React.FC = () => {
   };
 
   const handleMicToggle = () => {
-    if (isListening) {
+    if (isAssistantActive) {
+      deactivateAssistant();
+    } else if (isListening) {
       stopVoiceListening();
     } else {
-      startVoiceListening();
+      activateAssistant();
     }
   };
 
@@ -218,17 +221,18 @@ export const Navbar: React.FC = () => {
           {/* Desktop Voice Status Pill */}
           <div className="hidden lg:flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800/80 text-xs">
             <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${isListening ? 'bg-rose-500 animate-ping' : 'bg-emerald-500'}`} />
+              <span className={`w-2 h-2 rounded-full ${voiceActive ? 'bg-rose-500' : 'bg-emerald-500'}`} />
               <span className="text-slate-600 dark:text-slate-400 text-[11px] font-medium">
-                {isListening ? 'Voice Active' : `Spacebar (${(VOICE_LONG_PRESS_MS / 1000).toFixed(1)}s)`}
+                {voiceActive ? 'Voice Active' : `Spacebar (${(VOICE_LONG_PRESS_MS / 1000).toFixed(1)}s)`}
               </span>
             </div>
             <button
+              type="button"
               onClick={handleMicToggle}
               className="text-[11px] font-bold text-teal-600 dark:text-teal-400 hover:underline"
               title="Toggle Hands-Free Voice Assistant"
             >
-              {isListening ? 'Stop' : 'Voice'}
+              {voiceActive ? 'Stop' : 'Voice'}
             </button>
           </div>
 
@@ -339,27 +343,27 @@ export const Navbar: React.FC = () => {
 
           {/* Right Controls: Voice Toggle, Theme, Text Size, Language */}
           <div className="flex items-center gap-2 sm:gap-2.5 flex-shrink-0">
-            {/* Obvious Microphone Button */}
-            <Tooltip content={isListening ? 'Stop voice recording' : 'Start voice assistant'} position="bottom">
+            {/* Docked Voice Assistant Trigger (40px height, never floats over page cards) */}
+            <Tooltip content={voiceActive ? 'Stop voice assistant' : `${t.tapToSpeak} (or hold Spacebar)`} position="bottom">
               <button
+                type="button"
                 onClick={handleMicToggle}
-                className={`flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl font-bold text-xs transition-all shadow-2xs active:scale-95 border ${
-                  isListening
+                className={`h-10 flex items-center gap-1.5 px-3 sm:px-3.5 rounded-xl font-bold text-xs transition-all shadow-2xs active:scale-95 border ${
+                  voiceActive
                     ? 'bg-rose-600 border-rose-700 text-white animate-mic-active'
                     : 'bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-900/40'
                 }`}
-                aria-label={isListening ? t.stopListening : t.tapToSpeak}
+                aria-label={voiceActive ? t.stopListening : t.tapToSpeak}
               >
-                {isListening ? (
+                {voiceActive ? (
                   <>
-                    <MicOff className="w-4 h-4 text-white animate-pulse" />
+                    <MicOff className="w-4 h-4 text-white" aria-hidden="true" />
                     <span className="font-extrabold">{t.stopListening}</span>
                   </>
                 ) : (
                   <>
-                    <Mic className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                    <Mic className="w-4 h-4 text-teal-600 dark:text-teal-400" aria-hidden="true" />
                     <span className="hidden sm:inline">{t.tapToSpeak}</span>
-                    <span className="sm:hidden">Voice</span>
                   </>
                 )}
               </button>
@@ -407,9 +411,9 @@ export const Navbar: React.FC = () => {
               </button>
 
               {langDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl py-2 z-50 text-xs animate-fade-in">
+                <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl py-2 z-50 text-xs animate-fade-in">
                   <div className="px-3 py-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                    Primary & Regional Languages
+                    Supported Languages
                   </div>
                   {languageOptions.map((opt) => (
                     <button

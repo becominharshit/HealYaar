@@ -111,7 +111,7 @@ export const HomeView: React.FC = () => {
       description: t.home.cardAssistantDesc,
       icon: <MessageSquareHeart className="w-7 h-7 text-teal-600 dark:text-teal-400" aria-hidden="true" />,
       color: 'border-teal-200/60 dark:border-teal-800/60 bg-teal-50/40 dark:bg-teal-950/30 hover:border-teal-400',
-      badge: 'Dual-Layer RAG'
+      badge: t.home.badgeRag
     },
     {
       id: 'symptoms',
@@ -126,7 +126,7 @@ export const HomeView: React.FC = () => {
       description: t.home.cardReportsDesc,
       icon: <FileSpreadsheet className="w-7 h-7 text-purple-600 dark:text-purple-400" aria-hidden="true" />,
       color: 'border-purple-200/60 dark:border-purple-800/60 bg-purple-50/40 dark:bg-purple-950/30 hover:border-purple-400',
-      badge: 'Secure OCR'
+      badge: t.home.badgeSecureOcr
     },
     {
       id: 'medicines',
@@ -134,7 +134,7 @@ export const HomeView: React.FC = () => {
       description: t.home.cardMedicinesDesc,
       icon: <Pill className="w-7 h-7 text-rose-600 dark:text-rose-400" aria-hidden="true" />,
       color: 'border-rose-200/60 dark:border-rose-800/60 bg-rose-50/40 dark:bg-rose-950/30 hover:border-rose-400',
-      badge: 'Rx Reader'
+      badge: t.home.badgeRxReader
     },
     {
       id: 'doctors',
@@ -142,7 +142,7 @@ export const HomeView: React.FC = () => {
       description: t.home.cardDoctorsDesc,
       icon: <Stethoscope className="w-7 h-7 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />,
       color: 'border-emerald-200/60 dark:border-emerald-800/60 bg-emerald-50/40 dark:bg-emerald-950/30 hover:border-emerald-400',
-      badge: '10km Strict'
+      badge: t.home.badgeNearby
     },
     {
       id: 'nutrition',
@@ -157,7 +157,7 @@ export const HomeView: React.FC = () => {
       description: t.home.cardPeriodDesc,
       icon: <CalendarHeart className="w-7 h-7 text-pink-600 dark:text-pink-400" aria-hidden="true" />,
       color: 'border-pink-200/60 dark:border-pink-800/60 bg-pink-50/40 dark:bg-pink-950/30 hover:border-pink-400',
-      badge: 'Private'
+      badge: t.home.badgePrivate
     },
     {
       id: 'reminders',
@@ -165,7 +165,7 @@ export const HomeView: React.FC = () => {
       description: t.home.cardRemindersDesc,
       icon: <BellRing className="w-7 h-7 text-orange-600 dark:text-orange-400" aria-hidden="true" />,
       color: 'border-orange-200/60 dark:border-orange-800/60 bg-orange-50/40 dark:bg-orange-950/30 hover:border-orange-400',
-      badge: 'Alarms'
+      badge: t.home.badgeAlarms
     },
     {
       id: 'mental',
@@ -180,7 +180,7 @@ export const HomeView: React.FC = () => {
       description: t.home.cardFitnessDesc,
       icon: <Dumbbell className="w-7 h-7 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />,
       color: 'border-indigo-200/60 dark:border-indigo-800/60 bg-indigo-50/40 dark:bg-indigo-950/30 hover:border-indigo-400',
-      badge: 'Daily Log'
+      badge: t.home.badgeDailyLog
     }
   ];
 
@@ -552,7 +552,7 @@ export const HomeView: React.FC = () => {
               </div>
 
               <div className="mt-4 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 group-hover:text-teal-600 transition-colors">
-                <span>Open {card.title}</span>
+                <span>{t.home.openLabel} {card.title}</span>
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
               </div>
             </button>

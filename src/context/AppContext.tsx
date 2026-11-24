@@ -1,11 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import {
   NavTab,
   SupportedLanguage,
   TextSize,
   ReminderItem,
   PeriodCycleEntry,
-  MedicineCatalogItem,
   AuthGateState
 } from '../types';
 import {
@@ -27,6 +26,14 @@ import {
 import { getSafeTranslations, Translations } from '../i18n/translations';
 import { VoiceService, VoiceCommandMatch } from '../services/voiceService';
 import { teardownAllMediaAndBlobs } from '../utils/mediaSessionCleanup';
+import {
+  PUBLIC_TABS,
+  getPathForTab,
+  getTabForPath,
+  resolveAuthorizedTab
+} from '../utils/routePaths';
+
+export { PUBLIC_TABS };
 
 export interface PermissionModalState {
   isOpen: boolean;
@@ -36,8 +43,6 @@ export interface PermissionModalState {
   onGranted: () => void;
   onDenied: () => void;
 }
-
-export const PUBLIC_TABS: NavTab[] = ['landing', 'login', 'privacy', 'terms', 'cookies', 'refund'];
 
 interface AppContextType {
   tab: NavTab;
@@ -104,12 +109,6 @@ interface AppContextType {
   deletePeriodLog: (id: string) => void;
   deletePeriodLogs: () => void;
 
-  // Cart Management for Demo Pharmacy
-  cart: { item: MedicineCatalogItem; quantity: number }[];
-  addToCart: (item: MedicineCatalogItem) => void;
-  removeFromCart: (itemId: string) => void;
-  clearCart: () => void;
-
   // Feedback Notification Toast
   toastMessage: string | null;
   showToast: (msg: string) => void;
@@ -133,11 +132,30 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | null>(null);
 
+function syncBrowserUrl(targetTab: NavTab, replace = false): void {
+  try {
+    const nextPath = getPathForTab(targetTab);
+    if (window.location.pathname !== nextPath) {
+      if (replace) {
+        window.history.replaceState({ tab: targetTab }, '', nextPath);
+      } else {
+        window.history.pushState({ tab: targetTab }, '', nextPath);
+      }
+    }
+  } catch {
+    // ignore history errors in sandboxed frames
+  }
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => authService.getStoredUser());
+  const currentUserRef = useRef<AuthUser | null>(currentUser);
+  currentUserRef.current = currentUser;
+
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [sessionResetNonce, setSessionResetNonce] = useState<number>(0);
   const isManualLogoutRef = useRef<boolean>(false);
+  const isAuthTransitionRef = useRef<boolean>(true);
   const toastTimerRef = useRef<number | null>(null);
 
   const [authCallbackError, setAuthCallbackError] = useState<{ code: string; description: string } | null>(() => {
@@ -155,8 +173,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ? 'authenticated'
     : 'unauthenticated';
 
-  const [tab, setTabState] = useState<NavTab>('landing');
-  const [intendedTab, setIntendedTab] = useState<NavTab | null>(null);
+  const initialRequestedTab = typeof window !== 'undefined' ? getTabForPath(window.location.pathname) : 'landing';
+  const [tab, setTabState] = useState<NavTab>(() =>
+    resolveAuthorizedTab(initialRequestedTab, Boolean(authService.getStoredUser()))
+  );
+  const [intendedTab, setIntendedTab] = useState<NavTab | null>(() =>
+    !authService.getStoredUser() && !PUBLIC_TABS.includes(initialRequestedTab)
+      ? initialRequestedTab
+      : null
+  );
 
   const [language, setLanguage] = useState<SupportedLanguage>('en');
   const [textSize, setTextSize] = useState<TextSize>('normal');
@@ -219,23 +244,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Period Tracker State
   const [periodLogs, setPeriodLogs] = useState<PeriodCycleEntry[]>([]);
 
-  // Demo Pharmacy Cart
-  const [cart, setCart] = useState<{ item: MedicineCatalogItem; quantity: number }[]>([]);
+  const applyTab = useCallback((nextTab: NavTab, replaceUrl = false) => {
+    setTabState(nextTab);
+    syncBrowserUrl(nextTab, replaceUrl);
+  }, []);
 
   // Central route guard: unauthenticated users can ONLY visit public pages (landing, login, legal policies)
-  const setTab = (targetTab: NavTab) => {
-    if (!currentUser && !PUBLIC_TABS.includes(targetTab)) {
+  const setTab = useCallback((targetTab: NavTab) => {
+    const authed = Boolean(currentUserRef.current);
+    if (!authed && !PUBLIC_TABS.includes(targetTab)) {
       setIntendedTab(targetTab);
-      setTabState('login');
-      showToast('Please sign in to access your private health workspace.');
+      applyTab('login', false);
+      if (!isAuthTransitionRef.current) {
+        showToast('Please sign in to access your private health workspace.');
+      }
       return;
     }
-    if (currentUser && targetTab === 'landing') {
-      setTabState('home');
+    if (authed && targetTab === 'landing') {
+      applyTab('home', false);
       return;
     }
-    setTabState(targetTab);
-  };
+    applyTab(targetTab, false);
+  }, [applyTab]);
+
+  // Browser Back/Forward synchronization preserving strict auth gate
+  useEffect(() => {
+    const handlePopState = () => {
+      const requested = getTabForPath(window.location.pathname);
+      const authed = Boolean(currentUserRef.current);
+      const resolved = resolveAuthorizedTab(requested, authed);
+      if (!authed && !PUBLIC_TABS.includes(requested)) {
+        setIntendedTab(requested);
+        syncBrowserUrl('login', true);
+      } else if (resolved !== requested) {
+        syncBrowserUrl(resolved, true);
+      }
+      setTabState(resolved);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Sync Supabase Auth session & onAuthStateChange subscription
   useEffect(() => {
@@ -252,7 +301,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             description: callbackResult.errorDescription || 'Authentication failed.'
           });
           setCurrentUser(null);
-          setTabState('login');
+          applyTab('login', true);
+          isAuthTransitionRef.current = false;
           setIsAuthLoading(false);
           return true;
         }
@@ -261,8 +311,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           clearStoredAuthCallbackError();
           setAuthCallbackError(null);
           setCurrentUser(callbackResult.user);
+          currentUserRef.current = callbackResult.user;
+          isAuthTransitionRef.current = false;
           showToast(`Welcome to HealYaar, ${callbackResult.user.name}!`);
-          setTabState('home');
+          applyTab('home', true);
           setIsAuthLoading(false);
           return true;
         }
@@ -276,15 +328,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     window.addEventListener('popstate', processAuthCallback);
 
     (async () => {
+      isAuthTransitionRef.current = true;
       const handled = await processAuthCallback();
       if (handled) return;
 
       try {
         const user = await authService.getCurrentUser();
         if (!isMounted) return;
+        const requestedFromPath = getTabForPath(window.location.pathname);
+
         if (user) {
           setCurrentUser(user);
-          setTabState((prev) => (prev === 'landing' || prev === 'login' ? 'home' : prev));
+          currentUserRef.current = user;
+          const resolved = resolveAuthorizedTab(requestedFromPath, true);
+          const nextTab = resolved === 'login' ? 'home' : resolved;
+          applyTab(nextTab, true);
           // Preload cloud data in background
           const [cloudReminders, cloudCycles, cloudPrefs] = await Promise.all([
             reminderService.getReminders(user.id),
@@ -303,18 +361,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         } else {
           setCurrentUser(null);
+          currentUserRef.current = null;
           setReminders([]);
           setPeriodLogs([]);
-          setTabState((prev) => (PUBLIC_TABS.includes(prev) ? prev : 'landing'));
+          const resolved = resolveAuthorizedTab(requestedFromPath, false);
+          if (!PUBLIC_TABS.includes(requestedFromPath)) {
+            setIntendedTab(requestedFromPath);
+          }
+          applyTab(resolved, true);
         }
       } catch (err) {
         console.warn('Initial session check notice:', err);
         if (isMounted) {
           setCurrentUser(null);
-          setTabState('landing');
+          currentUserRef.current = null;
+          applyTab('landing', true);
         }
       } finally {
         if (isMounted) {
+          isAuthTransitionRef.current = false;
           setIsAuthLoading(false);
         }
       }
@@ -325,12 +390,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!isMounted) return;
 
       if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
+        isAuthTransitionRef.current = true;
         clearStoredAuthCallbackError();
         setAuthCallbackError(null);
         const user = await authService.getCurrentUser();
         if (user) {
           setCurrentUser(user);
-          setTabState((prev) => (prev === 'landing' || prev === 'login' ? 'home' : prev));
+          currentUserRef.current = user;
+          setTabState((prev) => {
+            const next = prev === 'landing' || prev === 'login' ? 'home' : prev;
+            syncBrowserUrl(next, true);
+            return next;
+          });
 
           // Fetch synchronized cloud data for this authenticated user
           try {
@@ -354,22 +425,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             console.warn('Auth state fetch notice:', syncErr);
           }
         }
+        isAuthTransitionRef.current = false;
       } else if (event === 'SIGNED_OUT') {
         teardownAllMediaAndBlobs();
         setCurrentUser(null);
+        currentUserRef.current = null;
         setReminders([]);
         setPeriodLogs([]);
-        setCart([]);
         setIntendedTab(null);
         setSessionResetNonce((n) => n + 1);
-        setTabState('login');
+        applyTab('login', true);
         if (!isManualLogoutRef.current) {
           showToast('Your session ended. Please sign in again.');
         }
         isManualLogoutRef.current = false;
       } else if (event === 'PASSWORD_RECOVERY') {
         // Direct user to reset password flow
-        setTabState('login');
+        applyTab('login', true);
         sessionStorage.setItem('healyaar_auth_recovery_mode', 'true');
       }
     });
@@ -654,87 +726,85 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('All menstrual cycle logs deleted permanently.');
   };
 
-  // Cart actions
-  const addToCart = (item: MedicineCatalogItem) => {
-    setCart(prev => {
-      const existing = prev.find(i => i.item.id === item.id);
-      if (existing) {
-        return prev.map(i =>
-          i.item.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
-        );
-      }
-      return [...prev, { item, quantity: 1 }];
-    });
-    showToast(`Added ${item.brandName} to demo cart`);
-  };
-
-  const removeFromCart = (itemId: string) => {
-    setCart(prev => prev.filter(i => i.item.id !== itemId));
-  };
-
-  const clearCart = () => setCart([]);
-
   // Authentication Actions
   const login = async (credentials: LoginCredentials): Promise<AuthResult> => {
-    const result = await authService.login(credentials);
-    if (result.success && result.user) {
-      setCurrentUser(result.user);
-      showToast(`Welcome back to HealYaar, ${result.user.name}!`);
+    isAuthTransitionRef.current = true;
+    try {
+      const result = await authService.login(credentials);
+      if (result.success && result.user) {
+        setCurrentUser(result.user);
+        currentUserRef.current = result.user;
+        showToast(`Welcome back to HealYaar, ${result.user.name}!`);
 
-      try {
-        const [cloudReminders, cloudCycles] = await Promise.all([
-          reminderService.getReminders(result.user.id),
-          periodService.getCycles(result.user.id)
-        ]);
-        setReminders(cloudReminders);
-        setPeriodLogs(cloudCycles);
-      } catch (err) {
-        console.warn('Post-login sync notice:', err);
+        try {
+          const [cloudReminders, cloudCycles] = await Promise.all([
+            reminderService.getReminders(result.user.id),
+            periodService.getCycles(result.user.id)
+          ]);
+          setReminders(cloudReminders);
+          setPeriodLogs(cloudCycles);
+        } catch (err) {
+          console.warn('Post-login sync notice:', err);
+        }
       }
-    }
       return result;
+    } finally {
+      isAuthTransitionRef.current = false;
+    }
   };
 
   const loginWithGoogle = async (): Promise<AuthResult> => {
-    const result = await authService.signInWithGoogle();
-    if (result.success && result.user) {
-      clearStoredAuthCallbackError();
-      setAuthCallbackError(null);
-      setCurrentUser(result.user);
-      showToast(`Welcome to HealYaar, ${result.user.name}!`);
+    isAuthTransitionRef.current = true;
+    try {
+      const result = await authService.signInWithGoogle();
+      if (result.success && result.user) {
+        clearStoredAuthCallbackError();
+        setAuthCallbackError(null);
+        setCurrentUser(result.user);
+        currentUserRef.current = result.user;
+        showToast(`Welcome to HealYaar, ${result.user.name}!`);
 
-      try {
-        const [cloudReminders, cloudCycles, cloudPrefs] = await Promise.all([
-          reminderService.getReminders(result.user.id),
-          periodService.getCycles(result.user.id),
-          userPreferencesService.getPreferences(result.user.id)
-        ]);
-        setReminders(cloudReminders);
-        setPeriodLogs(cloudCycles);
-        if (cloudPrefs) {
-          if (cloudPrefs.theme) setTheme(cloudPrefs.theme);
-          if (cloudPrefs.textSize) setTextSize(cloudPrefs.textSize);
-          if (cloudPrefs.language) setLanguage(cloudPrefs.language);
-          if (cloudPrefs.highContrast !== undefined) setHighContrast(cloudPrefs.highContrast);
+        try {
+          const [cloudReminders, cloudCycles, cloudPrefs] = await Promise.all([
+            reminderService.getReminders(result.user.id),
+            periodService.getCycles(result.user.id),
+            userPreferencesService.getPreferences(result.user.id)
+          ]);
+          setReminders(cloudReminders);
+          setPeriodLogs(cloudCycles);
+          if (cloudPrefs) {
+            if (cloudPrefs.theme) setTheme(cloudPrefs.theme);
+            if (cloudPrefs.textSize) setTextSize(cloudPrefs.textSize);
+            if (cloudPrefs.language) setLanguage(cloudPrefs.language);
+            if (cloudPrefs.highContrast !== undefined) setHighContrast(cloudPrefs.highContrast);
+          }
+        } catch (err) {
+          console.warn('Post-Google-login sync notice:', err);
         }
-      } catch (err) {
-        console.warn('Post-Google-login sync notice:', err);
       }
+      return result;
+    } finally {
+      isAuthTransitionRef.current = false;
     }
-    return result;
   };
 
   const signup = async (credentials: SignUpCredentials): Promise<AuthResult> => {
-    const result = await authService.signup(credentials);
-    if (result.success && result.user) {
-      setCurrentUser(result.user);
-      if (result.user.emailConfirmed) {
-        showToast(`Account created! Welcome to HealYaar, ${result.user.name}.`);
-      } else {
-        showToast(`Account created! Please check your email to verify your account.`);
+    isAuthTransitionRef.current = true;
+    try {
+      const result = await authService.signup(credentials);
+      if (result.success && result.user) {
+        setCurrentUser(result.user);
+        currentUserRef.current = result.user;
+        if (result.user.emailConfirmed) {
+          showToast(`Account created! Welcome to HealYaar, ${result.user.name}.`);
+        } else {
+          showToast(`Account created! Please check your email to verify your account.`);
+        }
       }
+      return result;
+    } finally {
+      isAuthTransitionRef.current = false;
     }
-    return result;
   };
 
   const logout = async () => {
@@ -749,15 +819,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Immediately clear all in-memory user state and redirect to Login
     setCurrentUser(null);
+    currentUserRef.current = null;
     setReminders([]);
     setPeriodLogs([]);
-    setCart([]);
     setIntendedTab(null);
     setIsListening(false);
     setLiveTranscript('');
     setIsAudioPlaying(false);
     setSessionResetNonce((n) => n + 1);
-    setTabState('login');
+    applyTab('login', true);
 
     try {
       window.dispatchEvent(new CustomEvent('healyaar_session_reset'));
@@ -779,12 +849,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const result = await authService.deleteAccountAndAllData(currentUser.id);
     setCurrentUser(null);
+    currentUserRef.current = null;
     setReminders([]);
     setPeriodLogs([]);
-    setCart([]);
     setIntendedTab(null);
     setSessionResetNonce((n) => n + 1);
-    setTabState('landing');
+    applyTab('landing', true);
     showToast(result.message);
     return result;
   };
@@ -853,10 +923,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatePeriodLog,
         deletePeriodLog,
         deletePeriodLogs,
-        cart,
-        addToCart,
-        removeFromCart,
-        clearCart,
         toastMessage,
         showToast
       }}

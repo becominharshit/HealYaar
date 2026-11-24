@@ -1,0 +1,11 @@
+{
+  "name": "HealYaar (हीलयार)",
+  "description": "Accessible Dual-Layer Private Healthcare RAG companion with Clinician Copilot SOAP notes, live lab & prescription simplification, ICMR-NIN Indian nutrition analysis, and real nearby care maps.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

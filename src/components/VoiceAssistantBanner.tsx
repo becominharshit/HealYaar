@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useVoiceAssistant, VOICE_LONG_PRESS_MS } from '../context/VoiceAssistantContext';
 import { useApp } from '../context/AppContext';
 import {
@@ -10,8 +10,7 @@ import {
   Clock,
   Compass,
   ShieldAlert,
-  Loader2,
-  Minimize2
+  Loader2
 } from 'lucide-react';
 
 export const VoiceAssistantBanner: React.FC = () => {
@@ -23,13 +22,11 @@ export const VoiceAssistantBanner: React.FC = () => {
     lastSpokenResponse,
     assistantError,
     pendingActionName,
-    activateAssistant,
     deactivateAssistant,
     retryListening
   } = useVoiceAssistant();
 
-  const { highContrast, t } = useApp();
-  const [isMinimized, setIsMinimized] = useState(false);
+  const { highContrast } = useApp();
 
   // 1. Long-press in progress: ACTIVATING or DEACTIVATING (0s to 0.8s countdown)
   if (assistantState === 'ACTIVATING' || assistantState === 'DEACTIVATING') {
@@ -57,7 +54,7 @@ export const VoiceAssistantBanner: React.FC = () => {
                   isActivating ? 'bg-teal-600 text-white' : 'bg-rose-600 text-white'
                 }`}
               >
-                <Clock className="w-5 h-5 animate-pulse" />
+                <Clock className="w-5 h-5 animate-pulse" aria-hidden="true" />
               </div>
               <div>
                 <h4 className="font-black text-sm sm:text-base">
@@ -75,7 +72,6 @@ export const VoiceAssistantBanner: React.FC = () => {
             </span>
           </div>
 
-          {/* Smooth 0.8-second Progress Bar */}
           <div className="w-full bg-white/20 h-2.5 rounded-full overflow-hidden">
             <div
               className={`h-full transition-all duration-75 rounded-full ${
@@ -110,42 +106,41 @@ export const VoiceAssistantBanner: React.FC = () => {
         >
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              {/* Dynamic State Icon */}
               {assistantState === 'LISTENING' && (
                 <div className="relative flex items-center justify-center w-11 h-11 rounded-2xl bg-teal-600 animate-mic-active flex-shrink-0 shadow-lg">
-                  <Mic className="w-5 h-5 text-white" />
+                  <Mic className="w-5 h-5 text-white" aria-hidden="true" />
                 </div>
               )}
               {assistantState === 'PROCESSING' && (
                 <div className="flex items-center justify-center w-11 h-11 rounded-2xl bg-indigo-600 animate-spin flex-shrink-0">
-                  <Loader2 className="w-5 h-5 text-white" />
+                  <Loader2 className="w-5 h-5 text-white" aria-hidden="true" />
                 </div>
               )}
               {assistantState === 'EXECUTING' && (
                 <div className="flex items-center justify-center w-11 h-11 rounded-2xl bg-blue-600 animate-bounce flex-shrink-0">
-                  <Compass className="w-5 h-5 text-white" />
+                  <Compass className="w-5 h-5 text-white" aria-hidden="true" />
                 </div>
               )}
               {assistantState === 'RESPONDING' && (
                 <div className="flex items-center justify-center w-11 h-11 rounded-2xl bg-emerald-600 animate-pulse flex-shrink-0">
-                  <Volume2 className="w-5 h-5 text-white" />
+                  <Volume2 className="w-5 h-5 text-white" aria-hidden="true" />
                 </div>
               )}
               {assistantState === 'AWAITING_CONFIRMATION' && (
                 <div className="flex items-center justify-center w-11 h-11 rounded-2xl bg-purple-600 animate-pulse flex-shrink-0">
-                  <ShieldAlert className="w-5 h-5 text-white" />
+                  <ShieldAlert className="w-5 h-5 text-white" aria-hidden="true" />
                 </div>
               )}
               {assistantState === 'ERROR' && (
                 <div className="flex items-center justify-center w-11 h-11 rounded-2xl bg-amber-600 flex-shrink-0">
-                  <AlertCircle className="w-5 h-5 text-white" />
+                  <AlertCircle className="w-5 h-5 text-white" aria-hidden="true" />
                 </div>
               )}
 
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-black text-sm sm:text-base flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-teal-400" />
+                    <Sparkles className="w-4 h-4 text-teal-400" aria-hidden="true" />
                     {assistantState === 'LISTENING' && 'Listening for commands...'}
                     {assistantState === 'PROCESSING' && 'Understanding...'}
                     {assistantState === 'EXECUTING' && 'Performing action...'}
@@ -175,7 +170,6 @@ export const VoiceAssistantBanner: React.FC = () => {
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div className="flex items-center gap-2 flex-shrink-0">
               {assistantState === 'ERROR' ? (
                 <button
@@ -194,15 +188,14 @@ export const VoiceAssistantBanner: React.FC = () => {
                 title={`Hold Spacebar ${(VOICE_LONG_PRESS_MS / 1000).toFixed(1)}s or click to turn off`}
                 aria-label="Turn off voice assistant"
               >
-                <MicOff className="w-3.5 h-3.5" />
+                <MicOff className="w-3.5 h-3.5" aria-hidden="true" />
                 <span className="hidden sm:inline">Turn Off</span>
               </button>
             </div>
           </div>
 
-          {/* Sub-label instruction */}
           <div className="pt-2 border-t border-white/10 flex items-center justify-between text-[11px] text-slate-400">
-            <span>💡 Hands-free active • Commands are confirmed verbally</span>
+            <span>Hands-free active • Commands are confirmed verbally</span>
             <span className="font-mono text-teal-300">Hold Spacebar {(VOICE_LONG_PRESS_MS / 1000).toFixed(1)}s to turn off</span>
           </div>
         </div>
@@ -210,48 +203,6 @@ export const VoiceAssistantBanner: React.FC = () => {
     );
   }
 
-  // 3. When OFF: Compact, collapsible pill indicator on bottom right (z-40, never blocks page actions)
-  if (isMinimized) {
-    return (
-      <div className="fixed bottom-4 right-4 z-40 animate-fade-in">
-        <button
-          type="button"
-          onClick={() => setIsMinimized(false)}
-          aria-label="Expand Voice Assistant button"
-          title="Expand Voice Assistant"
-          className="w-11 h-11 rounded-full bg-teal-600 hover:bg-teal-700 text-white shadow-lg flex items-center justify-center transition-all active:scale-95 border-2 border-white/80 dark:border-slate-900"
-        >
-          <Mic className="w-4 h-4" aria-hidden="true" />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fixed bottom-4 right-4 z-40 animate-fade-in flex items-center gap-1 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-700 rounded-full shadow-lg pl-1.5 pr-2 py-1">
-      <button
-        type="button"
-        onClick={activateAssistant}
-        className="flex items-center gap-2 pr-2 py-1 rounded-full text-slate-700 dark:text-slate-200 hover:text-teal-700 dark:hover:text-teal-300 text-xs font-bold transition-colors group"
-        title={`Hold Spacebar for ${(VOICE_LONG_PRESS_MS / 1000).toFixed(1)} seconds to activate hands-free Voice Assistant`}
-        aria-label={t.tapToSpeak}
-      >
-        <span className="w-7 h-7 rounded-full bg-teal-50 dark:bg-teal-950 group-hover:bg-teal-600 group-hover:text-white flex items-center justify-center transition-colors text-teal-600 dark:text-teal-400">
-          <Mic className="w-3.5 h-3.5" aria-hidden="true" />
-        </span>
-        <span className="hidden sm:inline font-extrabold text-slate-900 dark:text-white group-hover:text-teal-700 dark:group-hover:text-teal-300 whitespace-nowrap">
-          {t.tapToSpeak}
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={() => setIsMinimized(true)}
-        aria-label="Minimize voice assistant button"
-        title="Minimize"
-        className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-      >
-        <Minimize2 className="w-3 h-3" aria-hidden="true" />
-      </button>
-    </div>
-  );
+  // 3. When OFF: Docked cleanly inside the top header bar (Navbar.tsx) — render nothing floating here
+  return null;
 };

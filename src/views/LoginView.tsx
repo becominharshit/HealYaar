@@ -18,7 +18,8 @@ import {
   ArrowLeft,
   Info,
   Trash2,
-  LogOut
+  LogOut,
+  Download
 } from 'lucide-react';
 
 const DEMO_EMAIL = (import.meta as any).env?.VITE_DEMO_EMAIL || '';
@@ -38,7 +39,8 @@ export const LoginView: React.FC = () => {
     updatePassword,
     setTab,
     intendedTab,
-    setIntendedTab
+    setIntendedTab,
+    showToast
   } = useApp();
 
   // Mode: 'login' | 'signup' | 'forgot_password' | 'reset_password'
@@ -74,6 +76,7 @@ export const LoginView: React.FC = () => {
   const [isSigningOut, setIsSigningOut] = useState<boolean>(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<boolean>(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState<boolean>(false);
+  const [isExportingData, setIsExportingData] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorField, setErrorField] = useState<'name' | 'email' | 'password' | 'confirmPassword' | 'consent' | 'general' | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -355,6 +358,30 @@ export const LoginView: React.FC = () => {
     }
   };
 
+  const handleExportHealthData = async () => {
+    if (!currentUser || isExportingData) return;
+    setIsExportingData(true);
+    try {
+      const payload = await authService.exportAllUserData(currentUser);
+      const now = new Date();
+      const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `healyaar-health-export-${dateStamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast('Your health data export (JSON) has been downloaded.');
+    } catch {
+      showToast('Could not generate data export right now. Please try again.');
+    } finally {
+      setIsExportingData(false);
+    }
+  };
+
   // If user is already authenticated and visits the Account Details / login page
   if (isAuthenticated && currentUser) {
     return (
@@ -410,6 +437,45 @@ export const LoginView: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Data Portability: DPDP Act JSON Export */}
+        <section
+          aria-labelledby="data-export-heading"
+          className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4"
+        >
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 rounded-2xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex-shrink-0">
+              <Download className="w-5 h-5" aria-hidden="true" />
+            </div>
+            <div className="space-y-1">
+              <h2 id="data-export-heading" className="text-base font-extrabold text-slate-900 dark:text-white">
+                Data Portability (DPDP Act Export)
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Download a portable JSON copy of your medical reports, prescriptions, medication reminders, period cycle logs, saved clinics, and profile records anytime.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExportHealthData}
+            disabled={isExportingData}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition-colors disabled:opacity-60"
+          >
+            {isExportingData ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                <span>Preparing JSON Export...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" aria-hidden="true" />
+                <span>Export My Health Data (JSON)</span>
+              </>
+            )}
+          </button>
+        </section>
 
         {/* Danger Zone: Permanent Account & Health Data Deletion */}
         <section

@@ -3,36 +3,21 @@ import { useApp } from '../context/AppContext';
 import { SectionHero } from '../components/ui/SectionHero';
 import { PrescriptionsIllustration } from '../components/ContextualIllustrations';
 import { Tooltip } from '../components/ui/Tooltip';
-import {
-  syntheticPrescriptions,
-  syntheticMedicineCatalog,
-  syntheticPharmacies
-} from '../data/syntheticData';
-import {
-  SyntheticPrescription,
-  PrescriptionMedicine,
-  MedicineCatalogItem,
-  PharmacyListing
-} from '../types';
+import { EmptyStateCard } from '../components/ui/EmptyStateCard';
+import { PortalModal } from '../components/ui/PortalModal';
+import { SyntheticPrescription, PrescriptionMedicine } from '../types';
 import { prescriptionService } from '../services/prescriptionService';
 import { authService } from '../services/authService';
+import { aiClient } from '../services/aiClient';
 import { indexPrescription, deleteChunksBySource } from '../services/rag/ragVaultService';
-import { PortalModal } from '../components/ui/PortalModal';
 import { formatDisplayDate } from '../utils/healthFormatters';
 import { registerBlobUrl, revokeRegisteredBlobUrl } from '../utils/mediaSessionCleanup';
-import {
-  getBrowserCurrentPosition,
-  reverseGeocodeCoordinates,
-  calculateHaversineDistanceKm,
-  UserGeoLocation
-} from '../services/locationService';
 import { VoiceService } from '../services/voiceService';
 import {
   Pill,
   Upload,
   FileText,
   AlertTriangle,
-  ShoppingCart,
   CheckCircle2,
   BellRing,
   Info,
@@ -41,67 +26,111 @@ import {
   Plus,
   Trash2,
   MapPin,
-  Phone,
   Clock,
-  Compass,
   RefreshCw,
   X,
-  Copy,
-  ChevronRight,
-  Check,
-  PhoneCall,
-  ShieldAlert,
-  Building2,
   Edit3,
   Camera,
   Eye,
-  RotateCcw,
-  History
+  History,
+  Sparkles,
+  Volume2,
+  ArrowRight
 } from 'lucide-react';
+
+interface VisionPrescriptionResponse {
+  doctorName?: string;
+  doctorQualification?: string;
+  clinicName?: string;
+  date?: string;
+  diagnosisSummary?: string;
+  generalAdvice?: string;
+  medicines?: Array<{
+    name?: string;
+    genericName?: string;
+    dosage?: string;
+    frequency?: string;
+    timing?: string;
+    durationDays?: number;
+    instructions?: string;
+    confidence?: 'high' | 'medium' | 'low';
+    uncertainField?: string;
+  }>;
+}
+
+function getLocalTodayIso(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 export const PrescriptionsMedicinesView: React.FC = () => {
   const {
-    requestPermission,
-    permissions,
     showToast,
     addReminder,
     reminders,
     setTab,
-    cart,
-    addToCart,
-    removeFromCart,
-    clearCart,
-    currentUser
+    currentUser,
+    language
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'rx' | 'catalog' | 'cart'>('rx');
+  const [activeTab, setActiveTab] = useState<'rx' | 'my_medicines'>('rx');
 
-  // PRESCRIPTION STATE (Starts NULL by default — no preset sample shown initially)
+  // Prescription state — always starts clean with ONLY the authenticated user's own data
   const [selectedRx, setSelectedRx] = useState<SyntheticPrescription | null>(null);
   const [editableMedicines, setEditableMedicines] = useState<PrescriptionMedicine[]>([]);
   const [uploadedImageBlobUrl, setUploadedImageBlobUrl] = useState<string | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [showOriginalModal, setShowOriginalModal] = useState<boolean>(false);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [poweredByModel, setPoweredByModel] = useState<string | null>(null);
+  const [extractionWarning, setExtractionWarning] = useState<string | null>(null);
   const [prescriptionHistory, setPrescriptionHistory] = useState<SyntheticPrescription[]>([]);
   const [rxUploadConsent, setRxUploadConsent] = useState<boolean>(false);
   const [rxConsentError, setRxConsentError] = useState<string | null>(null);
+  const [medicineSearch, setMedicineSearch] = useState<string>('');
 
-  // Restore user's saved prescription and history from cloud/local if available
+  // Inline manual add/edit medicine state
+  const [isAddingMedicine, setIsAddingMedicine] = useState<boolean>(false);
+  const [newMedName, setNewMedName] = useState<string>('');
+  const [newMedGeneric, setNewMedGeneric] = useState<string>('');
+  const [newMedDosage, setNewMedDosage] = useState<string>('');
+  const [newMedFrequency, setNewMedFrequency] = useState<string>('1-0-1 (Twice Daily)');
+  const [newMedTiming, setNewMedTiming] = useState<string>('After meals');
+  const [newMedDuration, setNewMedDuration] = useState<string>('5');
+  const [newMedInstructions, setNewMedInstructions] = useState<string>('');
+
+  // Reminder creation modal state
+  const [showReminderConfirmModal, setShowReminderConfirmModal] = useState<boolean>(false);
+  const [reminderTargetMeds, setReminderTargetMeds] = useState<PrescriptionMedicine[]>([]);
+  const [reminderTimes, setReminderTimes] = useState<Record<string, string>>({
+    morning: '08:00',
+    afternoon: '13:00',
+    evening: '20:00',
+    bedtime: '21:30'
+  });
+  const [remindersCreatedSuccess, setRemindersCreatedSuccess] = useState<boolean>(false);
+
+  // Restore ONLY this user's saved prescriptions
   useEffect(() => {
     let isMounted = true;
     if (currentUser?.id) {
       try {
-        setRxUploadConsent(localStorage.getItem(`healyaar_user_${currentUser.id}_upload_consent_rx`) === 'true');
+        setRxUploadConsent(
+          localStorage.getItem(`healyaar_user_${currentUser.id}_upload_consent_rx`) === 'true'
+        );
       } catch {
         setRxUploadConsent(false);
       }
       prescriptionService.getPrescriptions(currentUser.id).then((savedList) => {
         if (isMounted && savedList) {
           setPrescriptionHistory(savedList);
-          if (savedList.length > 0 && !selectedRx) {
+          if (savedList.length > 0) {
             const latest = savedList[0];
-            setSelectedRx(latest);
-            setEditableMedicines(latest.medicines);
+            setSelectedRx((prev) => prev || latest);
+            setEditableMedicines((prev) => (prev.length > 0 ? prev : latest.medicines || []));
           }
         }
       });
@@ -111,67 +140,35 @@ export const PrescriptionsMedicinesView: React.FC = () => {
       setUploadedImageBlobUrl(null);
       setPrescriptionHistory([]);
       setRxUploadConsent(false);
+      setPoweredByModel(null);
+      setExtractionWarning(null);
     }
     return () => {
       isMounted = false;
     };
   }, [currentUser?.id]);
 
+  // Complete teardown on session reset / sign-out
   useEffect(() => {
     const handleReset = () => {
       if (uploadedImageBlobUrl) {
         revokeRegisteredBlobUrl(uploadedImageBlobUrl);
       }
       setUploadedImageBlobUrl(null);
+      setUploadedFileName(null);
       setSelectedRx(null);
       setEditableMedicines([]);
       setPrescriptionHistory([]);
       setShowOriginalModal(false);
       setShowReminderConfirmModal(false);
-      setShowDuplicateModal(false);
-      setSelectedPharmacyForCall(null);
+      setPoweredByModel(null);
+      setExtractionWarning(null);
     };
     window.addEventListener('healyaar_session_reset', handleReset);
     return () => window.removeEventListener('healyaar_session_reset', handleReset);
   }, [uploadedImageBlobUrl]);
 
-  const [catalogSearch, setCatalogSearch] = useState<string>('');
-  const [isDemoOrderCompleted, setIsDemoOrderCompleted] = useState<boolean>(false);
-
-  // -------------------------------------------------------------
-  // FEATURE 1: AUTOMATIC PRESCRIPTION MEDICINE REMINDERS
-  // -------------------------------------------------------------
-  const [showReminderConfirmModal, setShowReminderConfirmModal] = useState<boolean>(false);
-  const [showDuplicateModal, setShowDuplicateModal] = useState<boolean>(false);
-  const [duplicateMedsList, setDuplicateMedsList] = useState<PrescriptionMedicine[]>([]);
-  const [newMedsList, setNewMedsList] = useState<PrescriptionMedicine[]>([]);
-  const [reminderTimes, setReminderTimes] = useState<Record<string, string>>({
-    morning: '08:00',
-    afternoon: '13:00',
-    evening: '20:00',
-    bedtime: '21:30'
-  });
-  const [remindersCreatedSuccess, setRemindersCreatedSuccess] = useState<boolean>(false);
-
-  // -------------------------------------------------------------
-  // FEATURE 2: NEARBY MEDICAL STORE / PHARMACY FINDER
-  // -------------------------------------------------------------
-  const [showPharmacyFinder, setShowPharmacyFinder] = useState<boolean>(false);
-  const [userLocation, setUserLocation] = useState<UserGeoLocation | null>(() => {
-    try {
-      const saved = sessionStorage.getItem('healyaar_user_location');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [isLocating, setIsLocating] = useState<boolean>(false);
-  const [locationError, setLocationError] = useState<string | null>(null);
-  const [selectedPharmacyForCall, setSelectedPharmacyForCall] = useState<PharmacyListing | null>(null);
-  const [callInitiatedNotice, setCallInitiatedNotice] = useState<string | null>(null);
-  const [isScriptCopied, setIsScriptCopied] = useState<boolean>(false);
-
-  // Synchronize active prescription to sessionStorage for Voice Assistant spoken answers
+  // Sync active prescription for Voice Assistant readouts
   useEffect(() => {
     if (selectedRx && editableMedicines.length > 0) {
       try {
@@ -194,7 +191,7 @@ export const PrescriptionsMedicinesView: React.FC = () => {
     }
   }, [selectedRx, editableMedicines]);
 
-  // Clean up Object URL on unmount
+  // Clean up object URL on unmount
   useEffect(() => {
     return () => {
       if (uploadedImageBlobUrl) {
@@ -203,32 +200,219 @@ export const PrescriptionsMedicinesView: React.FC = () => {
     };
   }, [uploadedImageBlobUrl]);
 
-  /**
-   * Load Demo Prescription for instant live walkthroughs
-   */
-  const handleLoadDemoPrescription = () => {
-    setRxConsentError(null);
-    const demoBase = syntheticPrescriptions[0];
-    const demoRx: SyntheticPrescription = {
-      ...demoBase,
-      id: `rx-demo-${Date.now()}`,
-      patientName: 'Demo Patient Slip',
-      date: new Date().toISOString().split('T')[0]
-    };
+  // Aggregate strictly user's own prescribed medicines across all saved prescriptions
+  const myPrescribedMedicines = useMemo(() => {
+    const entries: Array<{
+      medicine: PrescriptionMedicine;
+      prescriptionId: string;
+      doctorName: string;
+      clinicName: string;
+      date: string;
+    }> = [];
 
-    setSelectedRx(demoRx);
-    setEditableMedicines(demoRx.medicines);
-    setRemindersCreatedSuccess(false);
-    setPrescriptionHistory((prev) => [demoRx, ...prev.filter((r) => r.id !== demoRx.id)]);
-    void prescriptionService.savePrescription(currentUser?.id || '', demoRx);
+    prescriptionHistory.forEach((rx) => {
+      (rx.medicines || []).forEach((med) => {
+        entries.push({
+          medicine: med,
+          prescriptionId: rx.id,
+          doctorName: rx.doctorName || 'Prescribing Clinician',
+          clinicName: rx.clinicName || '',
+          date: rx.date || ''
+        });
+      });
+    });
+
+    const q = medicineSearch.trim().toLowerCase();
+    if (!q) return entries;
+    return entries.filter(
+      (item) =>
+        item.medicine.name.toLowerCase().includes(q) ||
+        (item.medicine.genericName || '').toLowerCase().includes(q) ||
+        item.doctorName.toLowerCase().includes(q) ||
+        (item.medicine.instructions || '').toLowerCase().includes(q)
+    );
+  }, [prescriptionHistory, medicineSearch]);
+
+  const handleToggleConsent = (checked: boolean) => {
+    setRxUploadConsent(checked);
+    setRxConsentError(null);
     if (currentUser?.id) {
+      try {
+        localStorage.setItem(
+          `healyaar_user_${currentUser.id}_upload_consent_rx`,
+          checked ? 'true' : 'false'
+        );
+      } catch {
+        // ignore
+      }
+      if (checked) {
+        void authService.recordConsent(currentUser.id, '2.0');
+      }
+    }
+  };
+
+  /**
+   * Real Prescription Upload & Multimodal Vision Extraction via /api/ai (Gemini 4 Hydrogen)
+   */
+  const handlePrescriptionFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (!rxUploadConsent) {
+      setRxConsentError(
+        'Please confirm consent above before uploading your personal prescription slip.'
+      );
+      return;
+    }
+    setRxConsentError(null);
+    setExtractionWarning(null);
+    setPoweredByModel(null);
+
+    if (uploadedImageBlobUrl) {
+      revokeRegisteredBlobUrl(uploadedImageBlobUrl);
+    }
+    const blobUrl = registerBlobUrl(URL.createObjectURL(file));
+    setUploadedImageBlobUrl(blobUrl);
+    setUploadedFileName(file.name);
+    setIsAnalyzing(true);
+    setRemindersCreatedSuccess(false);
+
+    try {
+      const response = await aiClient.analyzeVision<VisionPrescriptionResponse>({
+        visionType: 'prescription',
+        file
+      });
+
+      const parsed = response.data || {};
+      const extractedMeds: PrescriptionMedicine[] = Array.isArray(parsed.medicines)
+        ? parsed.medicines
+            .filter((m) => m && typeof m.name === 'string' && m.name.trim().length > 0)
+            .map((m, idx) => ({
+              id: `med-${Date.now()}-${idx}`,
+              name: m.name!.trim(),
+              genericName: (m.genericName || '').trim(),
+              dosage: (m.dosage || 'As directed').trim(),
+              frequency: (m.frequency || 'As directed').trim(),
+              timing: (m.timing || 'After meals').trim(),
+              durationDays:
+                typeof m.durationDays === 'number' && m.durationDays > 0 ? m.durationDays : 5,
+              instructions: (m.instructions || 'Verify dose with your pharmacist or doctor.').trim(),
+              confidence: m.confidence || 'medium',
+              uncertainField: m.uncertainField || undefined
+            }))
+        : [];
+
+      const newRx: SyntheticPrescription = {
+        id: `rx-${Date.now()}`,
+        doctorName: parsed.doctorName?.trim() || 'Doctor name not detected (click to verify)',
+        doctorQualification: parsed.doctorQualification?.trim() || '',
+        clinicName: parsed.clinicName?.trim() || file.name,
+        patientName: currentUser?.name || 'You',
+        date: parsed.date?.trim() || getLocalTodayIso(),
+        diagnosisSummary:
+          parsed.diagnosisSummary?.trim() ||
+          'Uploaded prescription digitized. Please review every medicine name and dose against the original slip.',
+        medicines: extractedMeds,
+        generalAdvice:
+          parsed.generalAdvice?.trim() ||
+          'Always double-check handwriting, strengths, and durations with your prescribing doctor or licensed pharmacist.'
+      };
+
+      const savedRx = await prescriptionService.savePrescription(
+        currentUser?.id || '',
+        newRx,
+        file
+      );
+
+      setSelectedRx(savedRx);
+      setEditableMedicines(savedRx.medicines || []);
+      setPoweredByModel(response.poweredBy || 'Gemini 4 Hydrogen');
+      setPrescriptionHistory((prev) => [savedRx, ...prev.filter((r) => r.id !== savedRx.id)]);
+
+      if (currentUser?.id) {
+        indexPrescription(currentUser.id, {
+          id: savedRx.id,
+          doctorName: savedRx.doctorName,
+          clinicName: savedRx.clinicName,
+          date: savedRx.date,
+          diagnosis: savedRx.diagnosisSummary,
+          medications: savedRx.medicines.map((m) => ({
+            name: m.name,
+            dosage: m.dosage,
+            frequency: m.frequency,
+            timing: m.timing,
+            duration: m.durationDays ? `${m.durationDays} days` : 'As directed',
+            instructions: m.instructions
+          })),
+          advice: savedRx.generalAdvice
+        }).catch((err) => console.warn('RAG prescription indexing warning:', err));
+      }
+
+      if (extractedMeds.length === 0) {
+        setExtractionWarning(
+          'No clear medicine names could be automatically read from this image. You can inspect the original slip and add medicines manually below.'
+        );
+      }
+      showToast('Prescription analyzed and saved to your private cabinet.');
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Live AI prescription reader is temporarily unreachable.';
+      setExtractionWarning(
+        `${msg} Your original slip is ready to view below—no medicines were fabricated. You can enter your prescribed medicines manually to save them and set pill reminders.`
+      );
+
+      const manualRx: SyntheticPrescription = {
+        id: `rx-${Date.now()}`,
+        doctorName: 'Uploaded Prescription Slip',
+        doctorQualification: '',
+        clinicName: file.name,
+        patientName: currentUser?.name || 'You',
+        date: getLocalTodayIso(),
+        diagnosisSummary:
+          'Live AI extraction unavailable. Add medicines manually below to store in your cabinet and enable pill reminders.',
+        medicines: [],
+        generalAdvice: 'Verify all dosages directly from your physical prescription.'
+      };
+      setSelectedRx(manualRx);
+      setEditableMedicines([]);
+      setIsAddingMedicine(true);
+      showToast('Live AI unavailable — you can log medicines manually from your slip.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleCameraTrigger = () => {
+    if (!rxUploadConsent) {
+      setRxConsentError('Please confirm consent above before capturing a prescription.');
+      return;
+    }
+    const input = document.getElementById('rx-camera-input') as HTMLInputElement | null;
+    input?.click();
+  };
+
+  const persistPrescriptionUpdates = async (updatedMeds: PrescriptionMedicine[]) => {
+    if (!selectedRx) return;
+    const updatedRx: SyntheticPrescription = {
+      ...selectedRx,
+      medicines: updatedMeds
+    };
+    setSelectedRx(updatedRx);
+    setEditableMedicines(updatedMeds);
+
+    if (currentUser?.id) {
+      const saved = await prescriptionService.savePrescription(currentUser.id, updatedRx);
+      setPrescriptionHistory((prev) => [saved, ...prev.filter((r) => r.id !== updatedRx.id && r.id !== saved.id)]);
       indexPrescription(currentUser.id, {
-        id: demoRx.id,
-        doctorName: demoRx.doctorName,
-        clinicName: demoRx.clinicName,
-        date: demoRx.date,
-        diagnosis: demoRx.diagnosisSummary,
-        medications: demoRx.medicines?.map(m => ({
+        id: saved.id,
+        doctorName: saved.doctorName,
+        clinicName: saved.clinicName,
+        date: saved.date,
+        diagnosis: saved.diagnosisSummary,
+        medications: saved.medicines.map((m) => ({
           name: m.name,
           dosage: m.dosage,
           frequency: m.frequency,
@@ -236,1556 +420,986 @@ export const PrescriptionsMedicinesView: React.FC = () => {
           duration: m.durationDays ? `${m.durationDays} days` : 'As directed',
           instructions: m.instructions
         })),
-        advice: demoRx.generalAdvice
-      }).catch(e => console.warn('RAG demo prescription indexing failed:', e));
+        advice: saved.generalAdvice
+      }).catch(() => {});
     }
-    showToast('Demo prescription loaded and indexed into your Health Vault.');
   };
 
-  /**
-   * Handle Prescription File Upload or Camera Capture with on-device OCR
-   */
-  const handleSimulatedRxUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    if (!rxUploadConsent) {
-      setRxConsentError('Please confirm your on-device prescription processing consent before uploading a file.');
-      e.target.value = '';
+  const handleAddManualMedicine = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMedName.trim()) {
+      showToast('Please enter the medicine name.');
       return;
     }
-    setRxConsentError(null);
-    if (currentUser?.id) {
-      try {
-        localStorage.setItem(`healyaar_user_${currentUser.id}_upload_consent_rx`, 'true');
-      } catch {
-        // ignore
-      }
-      authService.recordConsent(currentUser.id, 'prescription_upload', '1.0').catch(() => {});
-    }
-    const file = e.target.files[0];
 
-    // Clean up previous blob URL if any
-    if (uploadedImageBlobUrl) {
-      revokeRegisteredBlobUrl(uploadedImageBlobUrl);
-    }
-    const objectUrl = registerBlobUrl(URL.createObjectURL(file));
-    setUploadedImageBlobUrl(objectUrl);
-    setIsAnalyzing(true);
-
-    const extract = () => {
-      showToast(`Scanning "${file.name}" locally on-device...`);
-      setTimeout(() => {
-        const lowerName = file.name.toLowerCase();
-        let baseRx: SyntheticPrescription;
-        if (
-          lowerName.includes('cough') ||
-          lowerName.includes('cold') ||
-          lowerName.includes('fever') ||
-          lowerName.includes('flu')
-        ) {
-          baseRx = syntheticPrescriptions[1];
-        } else if (
-          lowerName.includes('unclear') ||
-          lowerName.includes('blur') ||
-          lowerName.includes('safety') ||
-          lowerName.includes('test')
-        ) {
-          baseRx = syntheticPrescriptions[2];
-        } else {
-          baseRx = syntheticPrescriptions[0];
-        }
-
-        const newRx: SyntheticPrescription = {
-          ...baseRx,
-          id: `rx-user-${Date.now()}`,
-          patientName: 'You (Uploaded Slip)',
-          date: new Date().toISOString().split('T')[0]
-        };
-
-        setSelectedRx(newRx);
-        setEditableMedicines(newRx.medicines);
-        setRemindersCreatedSuccess(false);
-        setIsAnalyzing(false);
-        prescriptionService.savePrescription(currentUser?.id || '', newRx, file);
-        setPrescriptionHistory((prev) => [newRx, ...prev.filter((r) => r.id !== newRx.id)]);
-        if (currentUser?.id) {
-          indexPrescription(currentUser.id, {
-            id: newRx.id,
-            doctorName: newRx.doctorName,
-            clinicName: newRx.clinicName,
-            date: newRx.date,
-            diagnosis: newRx.diagnosisSummary,
-            medications: newRx.medicines?.map(m => ({
-              name: m.name,
-              dosage: m.dosage,
-              frequency: m.frequency,
-              timing: m.timing,
-              duration: m.durationDays ? `${m.durationDays} days` : 'As directed',
-              instructions: m.instructions
-            })),
-            advice: newRx.generalAdvice
-          }).catch(e => console.warn('RAG prescription indexing failed:', e));
-        }
-        showToast('Prescription text analyzed. Please review extracted medicines.');
-      }, 1000);
+    const createdMed: PrescriptionMedicine = {
+      id: `med-${Date.now()}`,
+      name: newMedName.trim(),
+      genericName: newMedGeneric.trim(),
+      dosage: newMedDosage.trim() || 'As directed',
+      frequency: newMedFrequency.trim() || 'Once daily',
+      timing: newMedTiming.trim() || 'After meals',
+      durationDays: Math.max(1, Number.parseInt(newMedDuration, 10) || 5),
+      instructions: newMedInstructions.trim() || 'Take as directed by your doctor.',
+      confidence: 'high'
     };
 
-    if (!permissions.rxOcr) {
-      requestPermission(
-        'rx_ocr',
-        'Prescription Scanning Consent',
-        `HealYaar needs your consent to scan "${file.name}" on your device. We extract medicine names, doses, and schedules so you can verify them. Nothing is stored on external clouds.`,
-        extract
-      );
-    } else {
-      extract();
-    }
+    const baseRx: SyntheticPrescription = selectedRx || {
+      id: `rx-${Date.now()}`,
+      doctorName: 'My Personal Prescription Entry',
+      doctorQualification: '',
+      clinicName: uploadedFileName || 'Personal Cabinet',
+      patientName: currentUser?.name || 'You',
+      date: getLocalTodayIso(),
+      diagnosisSummary: 'User-entered prescription medicines.',
+      medicines: [],
+      generalAdvice: 'Confirm doses with your doctor or pharmacist.'
+    };
 
-    // Reset input value so same file can be re-selected if needed
-    e.target.value = '';
-  };
+    const updatedRx: SyntheticPrescription = {
+      ...baseRx,
+      medicines: [...editableMedicines, createdMed]
+    };
 
-  /**
-   * Clear current prescription and return to clean empty state
-   */
-  const handleClearPrescription = () => {
-    if (uploadedImageBlobUrl) {
-      revokeRegisteredBlobUrl(uploadedImageBlobUrl);
-    }
-    setUploadedImageBlobUrl(null);
-    setSelectedRx(null);
-    setEditableMedicines([]);
-    setRemindersCreatedSuccess(false);
-    setShowPharmacyFinder(false);
-    setShowOriginalModal(false);
-    try {
-      sessionStorage.removeItem('healyaar_active_prescription');
-    } catch {
-      // ignore
-    }
-    showToast('Prescription cleared.');
-  };
+    setSelectedRx(updatedRx);
+    setEditableMedicines(updatedRx.medicines);
+    setNewMedName('');
+    setNewMedGeneric('');
+    setNewMedDosage('');
+    setNewMedInstructions('');
+    setIsAddingMedicine(false);
 
-  /**
-   * Select a prescription from history
-   */
-  const handleSelectHistoricalRx = (rx: SyntheticPrescription) => {
-    setSelectedRx(rx);
-    setEditableMedicines(rx.medicines);
-    setRemindersCreatedSuccess(false);
-    showToast(`Loaded prescription from ${rx.date || 'history'}.`);
-  };
-
-  /**
-   * Delete a prescription from history
-   */
-  const handleDeleteHistoricalRx = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setPrescriptionHistory((prev) => prev.filter((r) => r.id !== id));
-    if (selectedRx?.id === id) {
-      handleClearPrescription();
-    }
-    await prescriptionService.deletePrescription(currentUser?.id || '', id);
     if (currentUser?.id) {
-      deleteChunksBySource(currentUser.id, id).catch((err) => console.warn('RAG chunk deletion warning:', err));
+      const saved = await prescriptionService.savePrescription(currentUser.id, updatedRx);
+      setSelectedRx(saved);
+      setPrescriptionHistory((prev) => [saved, ...prev.filter((r) => r.id !== updatedRx.id && r.id !== saved.id)]);
+      indexPrescription(currentUser.id, {
+        id: saved.id,
+        doctorName: saved.doctorName,
+        clinicName: saved.clinicName,
+        date: saved.date,
+        diagnosis: saved.diagnosisSummary,
+        medications: saved.medicines.map((m) => ({
+          name: m.name,
+          dosage: m.dosage,
+          frequency: m.frequency,
+          timing: m.timing,
+          duration: m.durationDays ? `${m.durationDays} days` : 'As directed',
+          instructions: m.instructions
+        })),
+        advice: saved.generalAdvice
+      }).catch(() => {});
     }
-    showToast('Prescription removed from history.');
+
+    showToast(`Added ${createdMed.name} to your prescription cabinet.`);
   };
 
-  /**
-   * Manual correction for any unclear OCR field
-   */
-  const handleUpdateMedicine = (id: string, field: keyof PrescriptionMedicine, value: any) => {
-    setEditableMedicines((prev) =>
-      prev.map((m) => {
-        if (m.id === id) {
-          const updated = { ...m, [field]: value };
-          // If the user fixes the uncertain field, lift low confidence
-          if (m.uncertainField === field && value && !String(value).includes('[Unclear')) {
-            updated.confidence = 'high';
-            updated.uncertainField = undefined;
-          }
-          return updated;
-        }
-        return m;
-      })
-    );
+  const handleRemoveMedicine = async (medId: string) => {
+    const next = editableMedicines.filter((m) => m.id !== medId);
+    await persistPrescriptionUpdates(next);
+    showToast('Medicine removed from prescription.');
   };
 
-  // -------------------------------------------------------------
-  // REMINDER WORKFLOW METHODS
-  // -------------------------------------------------------------
+  const handleDeletePrescription = async (rxId: string) => {
+    if (!currentUser?.id) return;
+    await prescriptionService.deletePrescription(currentUser.id, rxId);
+    await deleteChunksBySource(currentUser.id, rxId).catch(() => {});
+    const remaining = prescriptionHistory.filter((r) => r.id !== rxId);
+    setPrescriptionHistory(remaining);
+    if (selectedRx?.id === rxId) {
+      const next = remaining[0] || null;
+      setSelectedRx(next);
+      setEditableMedicines(next?.medicines || []);
+    }
+    showToast('Prescription deleted from your cabinet and Health Vault.');
+  };
 
-  /**
-   * Step 1: User clicks "Add to Reminders"
-   * First check for unclear OCR fields; if safe, check duplicates
-   */
-  const handleOpenReminderConfirmation = () => {
-    const hasUnclearMeds = editableMedicines.some((m) => m.confidence === 'low');
-    if (hasUnclearMeds) {
-      showToast('Please verify the highlighted unclear fields before adding to reminders.');
+  const handleOpenReminderModal = (meds: PrescriptionMedicine[]) => {
+    if (meds.length === 0) {
+      showToast('Add at least one medicine first to create pill reminders.');
       return;
     }
-
-    // Check for duplicate medicines against existing reminders
-    const duplicates: PrescriptionMedicine[] = [];
-    const fresh: PrescriptionMedicine[] = [];
-
-    editableMedicines.forEach((med) => {
-      const medNameClean = med.name.toLowerCase().split(' ')[0];
-      const isAlreadyAdded = reminders.some((r) =>
-        r.title.toLowerCase().includes(medNameClean)
-      );
-
-      if (isAlreadyAdded) {
-        duplicates.push(med);
-      } else {
-        fresh.push(med);
-      }
-    });
-
-    if (duplicates.length > 0) {
-      setDuplicateMedsList(duplicates);
-      setNewMedsList(fresh);
-      setShowDuplicateModal(true);
-    } else {
-      setShowReminderConfirmModal(true);
-    }
+    setReminderTargetMeds(meds);
+    setRemindersCreatedSuccess(false);
+    setShowReminderConfirmModal(true);
   };
 
-  /**
-   * Resolve frequency and timing into HH:mm times
-   */
-  const resolveTimesForMedicine = (med: PrescriptionMedicine): string[] => {
+  const resolveTimesForFrequency = (freq: string, timing: string): string[] => {
+    const lower = `${freq} ${timing}`.toLowerCase();
     const times: string[] = [];
-    const freq = med.frequency.toLowerCase();
-    const timing = med.timing.toLowerCase();
-
-    if (freq.includes('twice') || freq.includes('1-0-1')) {
-      times.push(reminderTimes.morning, reminderTimes.evening);
-    } else if (freq.includes('thrice') || freq.includes('1-1-1')) {
-      times.push(reminderTimes.morning, reminderTimes.afternoon, reminderTimes.evening);
-    } else if (timing.includes('bedtime') || freq.includes('0-0-1')) {
-      times.push(reminderTimes.bedtime);
-    } else {
-      times.push(reminderTimes.morning);
+    if (lower.includes('1-1-1') || lower.includes('thrice') || lower.includes('tds') || lower.includes('tid')) {
+      return [reminderTimes.morning, reminderTimes.afternoon, reminderTimes.evening];
     }
-
+    if (lower.includes('1-0-1') || lower.includes('twice') || lower.includes('bd') || lower.includes('bid')) {
+      return [reminderTimes.morning, reminderTimes.evening];
+    }
+    if (lower.includes('bedtime') || lower.includes('night') || lower.includes('hs') || lower.includes('0-0-1')) {
+      return [reminderTimes.bedtime];
+    }
+    if (lower.includes('afternoon') || lower.includes('0-1-0')) {
+      return [reminderTimes.afternoon];
+    }
+    times.push(reminderTimes.morning);
     return times;
   };
 
-  /**
-   * Commit verified reminders to AppContext in one batch operation
-   */
-  const createRemindersFromPrescription = (medsToCreate: PrescriptionMedicine[]) => {
-    medsToCreate.forEach((med) => {
-      const scheduledTimes = resolveTimesForMedicine(med);
+  const handleConfirmCreateReminders = () => {
+    let createdCount = 0;
+    const allDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-      scheduledTimes.forEach((timeSlot) => {
-        addReminder({
-          title: `${med.name} (${med.dosage})`,
-          type: 'medicine',
-          time: timeSlot,
-          repeatDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-          instructions: `${med.frequency} • ${med.timing}. Duration: ${med.durationDays} days. ${med.instructions}`,
-          active: true
-        });
+    reminderTargetMeds.forEach((med) => {
+      const slots = resolveTimesForFrequency(med.frequency, med.timing);
+      slots.forEach((timeSlot) => {
+        const title = `${med.name}${med.dosage ? ` (${med.dosage})` : ''}`;
+        const alreadyExists = reminders.some(
+          (r) => r.title.toLowerCase() === title.toLowerCase() && r.time === timeSlot
+        );
+        if (!alreadyExists) {
+          addReminder({
+            title,
+            type: 'medicine',
+            time: timeSlot,
+            repeatDays: allDays,
+            instructions: `${med.timing} • ${med.frequency}. ${med.instructions}`,
+            active: true
+          });
+          createdCount += 1;
+        }
       });
     });
 
-    setShowReminderConfirmModal(false);
-    setShowDuplicateModal(false);
     setRemindersCreatedSuccess(true);
-
-    const successMsg = "Done. I've added your medicines to your reminders.";
-    showToast(successMsg);
-
-    VoiceService.speakText(successMsg, 'en');
+    if (createdCount > 0) {
+      showToast(`Created ${createdCount} medication reminder${createdCount > 1 ? 's' : ''}.`);
+    } else {
+      showToast('Matching medication reminders already exist in your Reminders schedule.');
+    }
   };
 
-  // -------------------------------------------------------------
-  // NEARBY PHARMACY / MEDICAL STORE METHODS
-  // -------------------------------------------------------------
+  const handleReadAloudRx = () => {
+    if (!selectedRx || editableMedicines.length === 0) return;
+    const lines = editableMedicines
+      .map((m) => `${m.name}, ${m.dosage}, ${m.frequency}, ${m.timing}.`)
+      .join(' ');
+    VoiceService.speakText(`Prescription summary from ${selectedRx.doctorName}. ${lines}`, language);
+  };
 
-  /**
-   * Start Pharmacy Search: requests GPS location
-   */
-  const handleStartPharmacySearch = async () => {
-    setShowPharmacyFinder(true);
-
-    if (userLocation) {
-      return;
-    }
-
-    setIsLocating(true);
-    setLocationError(null);
-    showToast('Locating nearby medical stores via GPS...');
-
+  const handleFindRealPharmacies = () => {
     try {
-      const coords = await getBrowserCurrentPosition();
-      const geo = await reverseGeocodeCoordinates(coords.latitude, coords.longitude);
-
-      const loc: UserGeoLocation = {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        accuracy: coords.accuracy,
-        locationName: geo.locationName,
-        city: geo.city,
-        state: geo.state,
-        isManual: false
-      };
-
-      setUserLocation(loc);
-      try {
-        sessionStorage.setItem('healyaar_user_location', JSON.stringify(loc));
-      } catch {
-        // ignore
-      }
-
-      showToast(`📍 Found location: ${geo.locationName}`);
-    } catch (err: any) {
-      setLocationError(err.message || 'Could not detect GPS location. You can view regional stores below.');
-    } finally {
-      setIsLocating(false);
+      sessionStorage.setItem('healyaar_doctors_filter', 'pharmacy');
+    } catch {
+      // ignore
     }
+    setTab('doctors');
   };
-
-  /**
-   * Sort pharmacies based on real Haversine distance
-   */
-  const sortedPharmacies = useMemo(() => {
-    if (!userLocation) {
-      return syntheticPharmacies.map((p) => ({ ...p, distanceKm: 0 }));
-    }
-
-    return syntheticPharmacies
-      .map((p) => ({
-        ...p,
-        distanceKm: calculateHaversineDistanceKm(
-          userLocation.latitude,
-          userLocation.longitude,
-          p.latitude,
-          p.longitude
-        )
-      }))
-      .sort((a, b) => (a.distanceKm ?? 0) - (b.distanceKm ?? 0));
-  }, [userLocation]);
-
-  /**
-   * Generate Call Script for the user to read to the pharmacist
-   */
-  const callScriptText = useMemo(() => {
-    const medNames = editableMedicines.map((m) => `${m.name} (${m.dosage})`).join(', ');
-    return `Hi, I have a prescription and I'd like to check whether you have these medicines available: ${medNames}. Could you please confirm availability and approximate pricing?`;
-  }, [editableMedicines]);
-
-  /**
-   * Handle Copy Script
-   */
-  const handleCopyScript = () => {
-    navigator.clipboard.writeText(callScriptText);
-    setIsScriptCopied(true);
-    showToast('Call script copied to clipboard!');
-    setTimeout(() => setIsScriptCopied(false), 2500);
-  };
-
-  /**
-   * User Confirms "Call Store"
-   */
-  const handleConfirmCallStore = (pharmacy: PharmacyListing) => {
-    const phoneUrl = `tel:${pharmacy.phone.replace(/\s+/g, '')}`;
-    window.location.href = phoneUrl;
-
-    const notice = `I've opened the call to ${pharmacy.name}. You can ask them about availability and pricing.`;
-    setCallInitiatedNotice(notice);
-    showToast(notice);
-    VoiceService.speakText(notice, 'en');
-  };
-
-  // -------------------------------------------------------------
-  // VOICE COMMAND LISTENERS (Decoupled Event Triggers)
-  // -------------------------------------------------------------
-  useEffect(() => {
-    const handleVoiceAddReminders = () => {
-      setActiveTab('rx');
-      if (selectedRx) {
-        handleOpenReminderConfirmation();
-      } else {
-        showToast('Please upload a prescription first.');
-      }
-    };
-
-    const handleVoiceFindPharmacy = () => {
-      setActiveTab('rx');
-      if (selectedRx) {
-        handleStartPharmacySearch();
-      } else {
-        showToast('Please upload a prescription first.');
-      }
-    };
-
-    window.addEventListener('healyaar_voice_trigger_rx_reminders', handleVoiceAddReminders);
-    window.addEventListener('healyaar_voice_trigger_pharmacy_search', handleVoiceFindPharmacy);
-
-    return () => {
-      window.removeEventListener('healyaar_voice_trigger_rx_reminders', handleVoiceAddReminders);
-      window.removeEventListener('healyaar_voice_trigger_pharmacy_search', handleVoiceFindPharmacy);
-    };
-  }, [selectedRx, editableMedicines]);
-
-  // Catalog search filtering
-  const filteredCatalog = syntheticMedicineCatalog.filter(
-    (item) =>
-      item.brandName.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-      item.genericName.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-      item.category.toLowerCase().includes(catalogSearch.toLowerCase())
-  );
-
-  const totalCartCost = cart.reduce((sum, entry) => sum + entry.item.approxPriceRupees * entry.quantity, 0);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 pb-16 animate-fade-in">
-      {/* Section Hero */}
+    <div className="max-w-5xl mx-auto space-y-6 pb-16 animate-fade-in">
+      {/* Header */}
       <SectionHero
-        title="Prescriptions & Medicines AI"
+        title="Prescriptions & My Medicines"
         badge={{
           icon: Pill,
-          text: 'Prescription OCR',
-          variant: 'pink'
+          text: 'Private Cabinet',
+          variant: 'teal'
         }}
         illustration={<PrescriptionsIllustration size="md" />}
         actions={
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 self-start sm:self-auto shadow-xs">
-            <button
-              onClick={() => setActiveTab('rx')}
-              className={`interactive-button px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
-                activeTab === 'rx'
-                  ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              Prescription Reader
-            </button>
-            <button
-              onClick={() => setActiveTab('catalog')}
-              className={`interactive-button px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
-                activeTab === 'catalog'
-                  ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              Medicine Catalog
-            </button>
-            <button
-              onClick={() => setActiveTab('cart')}
-              className={`interactive-button px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5 ${
-                activeTab === 'cart'
-                  ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <ShoppingCart className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-              <span>Demo Cart ({cart.reduce((s, i) => s + i.quantity, 0)})</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleFindRealPharmacies}
+            className="interactive-button inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white font-bold text-xs sm:text-sm shadow-xs transition-all whitespace-nowrap"
+          >
+            <MapPin className="w-4 h-4 text-teal-400" aria-hidden="true" />
+            <span>Find Nearby Pharmacies</span>
+          </button>
         }
       />
 
-      {/* Legal & Medical Notice */}
-      <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-200 flex items-start gap-3 text-sm">
-        <ShieldAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-        <div>
-          <strong>Pharmacy Legal Notice:</strong> HealYaar does NOT sell, dispense, or fulfill medicine orders. Schedule H/H1 prescription medications in India strictly require presenting a physical or digitally signed doctor's prescription to a licensed pharmacist. All phone inquiries are between you and the verified pharmacy.
+      {/* Two Clean Tabs: Upload Prescription | My Prescribed Medicines */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 p-2 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div className="flex items-center gap-1.5" role="tablist" aria-label="Prescription workspace tabs">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'rx'}
+            onClick={() => setActiveTab('rx')}
+            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-colors flex items-center gap-2 ${
+              activeTab === 'rx'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <FileText className="w-4 h-4" aria-hidden="true" />
+            <span>Upload &amp; Read Prescription</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'my_medicines'}
+            onClick={() => setActiveTab('my_medicines')}
+            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-colors flex items-center gap-2 ${
+              activeTab === 'my_medicines'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Pill className="w-4 h-4" aria-hidden="true" />
+            <span>My Prescribed Medicines ({myPrescribedMedicines.length})</span>
+          </button>
         </div>
+
+        <button
+          type="button"
+          onClick={() => setTab('reminders')}
+          className="px-3.5 py-2 rounded-xl text-xs font-bold text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-950/50 transition-colors flex items-center gap-1.5"
+        >
+          <BellRing className="w-3.5 h-3.5" aria-hidden="true" />
+          <span>View Pill Reminders</span>
+        </button>
       </div>
 
-      {/* SUB-VIEW 1: PRESCRIPTION READER & WORKFLOW */}
+      {/* TAB 1: UPLOAD & READ PRESCRIPTION */}
       {activeTab === 'rx' && (
         <div className="space-y-6">
-          {/* A. CLEAN EMPTY STATE (When no prescription is loaded) */}
-          {!selectedRx ? (
-            <div className="space-y-6">
-              {/* Main Upload / Camera Hero Card */}
-              <section className="interactive-card bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 shadow-sm text-center space-y-6">
-                <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
-                  <FileText className="w-8 h-8" />
-                </div>
-
-                <div className="max-w-xl mx-auto">
-                  <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                    Upload or Capture Your Prescription
-                  </h2>
-                </div>
-
-                {isAnalyzing ? (
-                  <div className="py-8 space-y-3 animate-fade-in">
-                    <div className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl bg-teal-50 border border-teal-200 text-teal-800 font-bold text-sm">
-                      <RefreshCw className="w-5 h-5 animate-spin text-teal-600" />
-                      <span>Scanning doctor's slip on-device & extracting medicines...</span>
-                    </div>
-                    <p className="text-xs text-slate-500">Extracting medicine names, dosages, timings, and instructions</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {/* First-Time Prescription Upload Consent */}
-                    <div className="max-w-lg mx-auto text-left space-y-1.5">
-                      <label
-                        htmlFor="rx-upload-consent"
-                        className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 cursor-pointer text-xs text-slate-700 dark:text-slate-300"
-                      >
-                        <input
-                          id="rx-upload-consent"
-                          type="checkbox"
-                          checked={rxUploadConsent}
-                          onChange={(e) => {
-                            setRxUploadConsent(e.target.checked);
-                            if (e.target.checked) setRxConsentError(null);
-                          }}
-                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500 flex-shrink-0"
-                        />
-                        <span>
-                          I consent to HealYaar scanning my prescription on-device to extract dosages for personal reminder tracking (always verify against your doctor&apos;s slip).
-                        </span>
-                      </label>
-                      {rxConsentError && (
-                        <p role="alert" className="text-xs font-semibold text-rose-600">
-                          {rxConsentError}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3 pt-1">
-                      <label className="interactive-button cursor-pointer inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm shadow-md transition-all active:scale-95 w-full sm:w-auto">
-                        <Upload className="w-4 h-4" aria-hidden="true" />
-                        <span>Upload Doctor Prescription</span>
-                        <input
-                          type="file"
-                          accept="image/*,.pdf"
-                          className="hidden"
-                          onChange={handleSimulatedRxUpload}
-                        />
-                      </label>
-
-                      <label className="interactive-button cursor-pointer inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-white hover:bg-slate-100 text-slate-800 font-bold text-sm border border-slate-300 shadow-xs transition-all active:scale-95 w-full sm:w-auto">
-                        <Camera className="w-4 h-4 text-teal-600" aria-hidden="true" />
-                        <span>Capture with Camera</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          className="hidden"
-                          onChange={handleSimulatedRxUpload}
-                        />
-                      </label>
-
-                      <button
-                        type="button"
-                        onClick={handleLoadDemoPrescription}
-                        className="interactive-button inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold text-sm border border-rose-200 shadow-xs transition-all active:scale-95 w-full sm:w-auto"
-                      >
-                        <FileText className="w-4 h-4 text-rose-600" aria-hidden="true" />
-                        <span>Load Demo Prescription</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {/* Informational Trust & Feature Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="interactive-card p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-1.5">
-                  <div className="w-9 h-9 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center font-bold">
-                    <ShieldCheck className="w-5 h-5" />
-                  </div>
-                  <h3 className="font-extrabold text-sm text-slate-900">100% On-Device Privacy</h3>
-                  <p className="text-xs text-slate-500 font-normal">
-                    Processed securely on your device
-                  </p>
-                </div>
-
-                <div className="interactive-card p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-1.5">
-                  <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
-                    <FileText className="w-5 h-5" />
-                  </div>
-                  <h3 className="font-extrabold text-sm text-slate-900">AI OCR Extraction</h3>
-                  <p className="text-xs text-slate-500 font-normal">
-                    Detects medicines and schedules
-                  </p>
-                </div>
-
-                <div className="interactive-card p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-1.5">
-                  <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
-                    <AlertTriangle className="w-5 h-5" />
-                  </div>
-                  <h3 className="font-extrabold text-sm text-slate-900">Handwriting Safety</h3>
-                  <p className="text-xs text-slate-500 font-normal">
-                    Highlights low-confidence text
-                  </p>
-                </div>
-
-                <div className="interactive-card p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-1.5">
-                  <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
-                    <BellRing className="w-5 h-5" />
-                  </div>
-                  <h3 className="font-extrabold text-sm text-slate-900">Smart Pill Reminders</h3>
-                  <p className="text-xs text-slate-500 font-normal">
-                    Converts doses into alarms
-                  </p>
-                </div>
+          {/* Upload Card */}
+          <section className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white">
+                  Digitize Your Doctor&apos;s Prescription
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                  Upload a photo or PDF of your real prescription slip to extract medicine names, dosages, timings, and create pill reminders.
+                </p>
               </div>
+              {poweredByModel && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-300 text-xs font-bold self-start sm:self-auto">
+                  <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Powered by {poweredByModel}</span>
+                </span>
+              )}
             </div>
-          ) : (
-            /* B. SIMPLIFIED PRESCRIPTION REVIEW CARD (When prescription is loaded) */
-            <section className="interactive-card bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-sm space-y-6">
-              <div className="pb-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <div className="inline-block px-2.5 py-1 bg-teal-100 text-teal-800 rounded text-xs font-bold mb-1">
-                    Simplified Doctor Prescription
+
+            {/* Required Consent Checkbox */}
+            <div
+              className={`p-4 rounded-2xl border text-xs leading-relaxed ${
+                rxConsentError
+                  ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800'
+                  : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rxUploadConsent}
+                  onChange={(e) => handleToggleConsent(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500 flex-shrink-0"
+                />
+                <span className="text-slate-700 dark:text-slate-300">
+                  I consent to securely process this prescription through HealYaar&apos;s authenticated AI reader and store it inside my private Row-Level-Secured account. I understand I must verify all extracted doses against my original prescription.
+                </span>
+              </label>
+              {rxConsentError && (
+                <p role="alert" className="mt-2 text-rose-700 dark:text-rose-300 font-bold">
+                  {rxConsentError}
+                </p>
+              )}
+            </div>
+
+            {/* Upload & Camera Controls */}
+            <div className="flex flex-wrap items-center gap-3">
+              <label
+                className={`inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-xs sm:text-sm transition-colors cursor-pointer ${
+                  isAnalyzing
+                    ? 'bg-slate-300 dark:bg-slate-700 text-slate-600 cursor-wait'
+                    : 'bg-teal-600 hover:bg-teal-700 text-white shadow-xs'
+                }`}
+              >
+                {isAnalyzing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" aria-hidden="true" />
+                    <span>Reading Prescription...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" aria-hidden="true" />
+                    <span>Upload Prescription (JPG / PNG / PDF)</span>
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  disabled={isAnalyzing}
+                  onChange={handlePrescriptionFileUpload}
+                  className="hidden"
+                />
+              </label>
+
+              <button
+                type="button"
+                disabled={isAnalyzing}
+                onClick={handleCameraTrigger}
+                className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 font-bold text-xs sm:text-sm transition-colors disabled:opacity-60"
+              >
+                <Camera className="w-4 h-4 text-teal-600 dark:text-teal-400" aria-hidden="true" />
+                <span>Take Photo</span>
+              </button>
+              <input
+                id="rx-camera-input"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                disabled={isAnalyzing}
+                onChange={handlePrescriptionFileUpload}
+                className="hidden"
+              />
+
+              <button
+                type="button"
+                onClick={() => setIsAddingMedicine((prev) => !prev)}
+                className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs sm:text-sm transition-colors"
+              >
+                <Plus className="w-4 h-4 text-teal-600 dark:text-teal-400" aria-hidden="true" />
+                <span>Add Medicine Manually</span>
+              </button>
+
+              {uploadedImageBlobUrl && (
+                <button
+                  type="button"
+                  onClick={() => setShowOriginalModal(true)}
+                  className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-teal-50 dark:bg-teal-950/50 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 font-bold text-xs sm:text-sm"
+                >
+                  <Eye className="w-4 h-4" aria-hidden="true" />
+                  <span>View Uploaded Slip</span>
+                </button>
+              )}
+            </div>
+
+            {extractionWarning && (
+              <div
+                role="status"
+                className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs sm:text-sm flex items-start gap-2.5"
+              >
+                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <span>{extractionWarning}</span>
+              </div>
+            )}
+
+            {/* Manual Add Medicine Form */}
+            {isAddingMedicine && (
+              <form
+                onSubmit={handleAddManualMedicine}
+                className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-4 animate-fade-in"
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Edit3 className="w-4 h-4 text-teal-600" aria-hidden="true" />
+                    <span>Add Medicine Entry</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingMedicine(false)}
+                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                    aria-label="Close manual entry form"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                      Medicine Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={newMedName}
+                      onChange={(e) => setNewMedName(e.target.value)}
+                      placeholder="e.g. Metformin 500mg"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
                   </div>
-                  <h3 className="text-2xl font-black text-slate-900">
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                      Generic / Salt Name
+                    </label>
+                    <input
+                      type="text"
+                      value={newMedGeneric}
+                      onChange={(e) => setNewMedGeneric(e.target.value)}
+                      placeholder="e.g. Metformin Hydrochloride"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                      Dosage
+                    </label>
+                    <input
+                      type="text"
+                      value={newMedDosage}
+                      onChange={(e) => setNewMedDosage(e.target.value)}
+                      placeholder="e.g. 1 Tablet (500 mg)"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                      Frequency
+                    </label>
+                    <select
+                      value={newMedFrequency}
+                      onChange={(e) => setNewMedFrequency(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    >
+                      <option value="1-0-0 (Once Daily - Morning)">1-0-0 (Once Daily - Morning)</option>
+                      <option value="1-0-1 (Twice Daily)">1-0-1 (Twice Daily)</option>
+                      <option value="1-1-1 (Thrice Daily)">1-1-1 (Thrice Daily)</option>
+                      <option value="0-0-1 (At Bedtime)">0-0-1 (At Bedtime)</option>
+                      <option value="SOS (As Needed)">SOS (As Needed)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                      Meal Timing
+                    </label>
+                    <select
+                      value={newMedTiming}
+                      onChange={(e) => setNewMedTiming(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    >
+                      <option value="After meals">After meals</option>
+                      <option value="Before meals">Before meals</option>
+                      <option value="With food">With food</option>
+                      <option value="At bedtime">At bedtime</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                      Duration (Days)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={newMedDuration}
+                      onChange={(e) => setNewMedDuration(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                    Special Instructions
+                  </label>
+                  <input
+                    type="text"
+                    value={newMedInstructions}
+                    onChange={(e) => setNewMedInstructions(e.target.value)}
+                    placeholder="e.g. Take with a full glass of water"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingMedicine(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs"
+                  >
+                    Save Medicine
+                  </button>
+                </div>
+              </form>
+            )}
+          </section>
+
+          {/* Active Prescription Details OR Empty State */}
+          {!selectedRx ? (
+            <EmptyStateCard
+              icon={<FileText className="w-6 h-6" aria-hidden="true" />}
+              title="No prescriptions uploaded yet"
+              description="Upload a photo or PDF of your doctor's prescription above—or add your prescribed medicines manually—to digitize schedules and create one-click pill reminders."
+              actionText="Add Medicine Manually"
+              onAction={() => setIsAddingMedicine(true)}
+            />
+          ) : (
+            <section className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 text-xs font-bold">
+                      Saved Prescription
+                    </span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      {formatDisplayDate(selectedRx.date)}
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white">
                     {selectedRx.doctorName}
                   </h3>
-                  <p className="text-xs sm:text-sm text-slate-600">
-                    {selectedRx.doctorQualification} • {selectedRx.clinicName} • Date: {formatDisplayDate(selectedRx.date)}
+                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+                    {[selectedRx.doctorQualification, selectedRx.clinicName].filter(Boolean).join(' • ')}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {uploadedImageBlobUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setShowOriginalModal(true)}
-                      className="interactive-button px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 flex items-center gap-1.5 shadow-2xs"
-                    >
-                      <Eye className="w-4 h-4 text-teal-600" />
-                      <span>View Original Document</span>
-                    </button>
+                  {editableMedicines.length > 0 && (
+                    <>
+                      <Tooltip content="Read medicines aloud" position="top">
+                        <button
+                          type="button"
+                          onClick={handleReadAloudRx}
+                          className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5"
+                        >
+                          <Volume2 className="w-3.5 h-3.5 text-teal-600" aria-hidden="true" />
+                          <span>Read Aloud</span>
+                        </button>
+                      </Tooltip>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenReminderModal(editableMedicines)}
+                        className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs"
+                      >
+                        <BellRing className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Create Pill Reminders</span>
+                      </button>
+                    </>
                   )}
-
                   <button
                     type="button"
-                    onClick={handleClearPrescription}
-                    className="interactive-button px-3.5 py-2 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 text-xs font-bold rounded-xl border border-slate-200 flex items-center gap-1.5 shadow-2xs"
-                    title="Clear and upload another prescription"
+                    onClick={() => handleDeletePrescription(selectedRx.id)}
+                    className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                    aria-label="Delete prescription"
+                    title="Delete prescription"
                   >
-                    <RotateCcw className="w-4 h-4" />
-                    <span>Upload Another</span>
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
-              <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-2xl text-xs sm:text-sm text-blue-950 font-medium">
-                <strong>Doctor's Advice:</strong> {selectedRx.generalAdvice}
-              </div>
-
-              {/* Status Progression Bar */}
-              <div className="flex flex-wrap items-center gap-2 text-xs py-1 px-3 bg-slate-50 rounded-xl border border-slate-200">
-                <span className="font-bold text-slate-500 uppercase text-[10px] mr-1">Status:</span>
-                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md font-bold flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" />
-                  <span>Uploaded</span>
-                </span>
-                <ChevronRight className="w-3 h-3 text-slate-400" />
-                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md font-bold flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" />
-                  <span>Extracted ({editableMedicines.length})</span>
-                </span>
-                <ChevronRight className="w-3 h-3 text-slate-400" />
-                <span
-                  className={`px-2 py-0.5 rounded-md font-bold flex items-center gap-1 ${
-                    editableMedicines.some((m) => m.confidence === 'low')
-                      ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-300'
-                      : 'bg-emerald-100 text-emerald-800'
-                  }`}
-                >
-                  {editableMedicines.some((m) => m.confidence === 'low') ? (
-                    <>
-                      <AlertTriangle className="w-3 h-3 text-amber-700" />
-                      <span>Needs Review</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Verified</span>
-                    </>
-                  )}
-                </span>
-                <ChevronRight className="w-3 h-3 text-slate-400" />
-                <span
-                  className={`px-2 py-0.5 rounded-md font-bold flex items-center gap-1 ${
-                    remindersCreatedSuccess
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-slate-200 text-slate-600'
-                  }`}
-                >
-                  {remindersCreatedSuccess ? (
-                    <>
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Reminders Scheduled</span>
-                    </>
-                  ) : (
-                    <span>Reminders Pending</span>
-                  )}
-                </span>
-              </div>
-
-              {/* Extracted Medicines List */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-900 text-base">
-                    Extracted Medicines & Instructions:
-                  </h4>
-                  <span className="text-xs text-slate-500">Review carefully before scheduling reminders</span>
+              {selectedRx.diagnosisSummary && (
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 text-xs sm:text-sm text-slate-700 dark:text-slate-300">
+                  <strong className="text-slate-900 dark:text-white">Summary: </strong>
+                  {selectedRx.diagnosisSummary}
                 </div>
+              )}
 
-                <div className="space-y-4">
-                  {editableMedicines.map((med) => {
-                    const isUnclear = med.confidence === 'low';
-                    return (
-                      <div
-                        key={med.id}
-                        className={`interactive-card p-5 rounded-2xl border transition-all space-y-3 ${
-                          isUnclear
-                            ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-200'
-                            : 'bg-slate-50 border-slate-200'
-                        }`}
-                      >
-                        {/* Safety Warning for Unclear OCR */}
-                        {isUnclear && (
-                          <div className="p-3 bg-amber-100/90 rounded-xl border border-amber-300 text-amber-950 text-xs flex items-start gap-2">
-                            <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
-                            <div>
-                              <strong>Verification Required:</strong> I couldn't confidently read some information from this prescription ({med.uncertainField || 'dosage'}). Please verify it with your doctor or pharmacist and correct it below before adding to reminders.
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              {/* Medicines List */}
+              {editableMedicines.length === 0 ? (
+                <div className="p-6 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-center space-y-2">
+                  <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                    No medicines listed on this prescription yet.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingMedicine(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-600 text-white text-xs font-bold"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Medicine</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {editableMedicines.map((med) => (
+                    <div
+                      key={med.id}
+                      className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 flex flex-col justify-between gap-3"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
                           <div>
-                            <span className="text-xs font-bold uppercase text-slate-400">Medicine Name</span>
-                            <input
-                              type="text"
-                              value={med.name}
-                              onChange={(e) => handleUpdateMedicine(med.id, 'name', e.target.value)}
-                              className="font-extrabold text-lg text-slate-900 bg-transparent border-b border-dashed border-slate-300 focus:outline-none focus:border-teal-500 w-full"
-                            />
-                            <div className="text-xs text-slate-500 mt-0.5">
-                              Active Generic: <strong>{med.genericName}</strong>
-                            </div>
-                          </div>
-
-                          {med.confidence === 'high' ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold w-fit">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>OCR Verified</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-200 text-amber-900 rounded-lg text-xs font-bold w-fit">
-                              <Edit3 className="w-3.5 h-3.5" />
-                              <span>Edit to Verify</span>
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Structured Details Grid */}
-                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
-                          <div className="p-2.5 bg-white rounded-xl border border-slate-200">
-                            <span className="text-slate-400 font-bold uppercase block">Strength / Dose</span>
-                            <input
-                              type="text"
-                              value={med.dosage}
-                              onChange={(e) => handleUpdateMedicine(med.id, 'dosage', e.target.value)}
-                              className="font-bold text-slate-800 w-full bg-transparent focus:outline-none"
-                            />
-                          </div>
-
-                          <div className="p-2.5 bg-white rounded-xl border border-slate-200">
-                            <span className="text-slate-400 font-bold uppercase block">Frequency</span>
-                            <input
-                              type="text"
-                              value={med.frequency}
-                              onChange={(e) => handleUpdateMedicine(med.id, 'frequency', e.target.value)}
-                              className="font-bold text-slate-800 w-full bg-transparent focus:outline-none"
-                            />
-                          </div>
-
-                          <div className="p-2.5 bg-white rounded-xl border border-slate-200">
-                            <span className="text-slate-400 font-bold uppercase block">Timing</span>
-                            <input
-                              type="text"
-                              value={med.timing}
-                              onChange={(e) => handleUpdateMedicine(med.id, 'timing', e.target.value)}
-                              className="font-bold text-slate-800 w-full bg-transparent focus:outline-none"
-                            />
-                          </div>
-
-                          <div className="p-2.5 bg-white rounded-xl border border-slate-200">
-                            <span className="text-slate-400 font-bold uppercase block">Duration</span>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                value={med.durationDays}
-                                onChange={(e) => handleUpdateMedicine(med.id, 'durationDays', parseInt(e.target.value) || 1)}
-                                className="font-bold text-slate-800 w-16 bg-transparent focus:outline-none"
-                              />
-                              <span className="text-slate-500 font-medium">days</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="text-xs text-slate-700 bg-white p-2.5 rounded-xl border border-slate-200">
-                          <strong>Doctor's Instructions:</strong> {med.instructions}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* STEP 1: ADD TO REMINDERS CONFIRMATION CARD */}
-              <div className="interactive-card p-6 rounded-3xl bg-gradient-to-r from-teal-50 to-emerald-50 border-2 border-teal-200 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <BellRing className="w-5 h-5 text-teal-600" />
-                      <h4 className="text-lg font-black text-slate-900">
-                        Would you like me to add these medicines to your reminders?
-                      </h4>
-                    </div>
-                    <p className="text-xs sm:text-sm text-slate-600">
-                      We'll automatically schedule daily pill alarms based on your prescription timing ({editableMedicines.length} medicines).
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={handleOpenReminderConfirmation}
-                      className="interactive-button px-5 py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow transition-transform active:scale-95 flex items-center gap-2"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>Add to Reminders</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => showToast('Prescription reminders skipped for now.')}
-                      className="interactive-button px-4 py-3 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs sm:text-sm rounded-xl border border-slate-300 shadow-xs"
-                    >
-                      Not Now
-                    </button>
-                  </div>
-                </div>
-
-                {/* Reminders Created Success Confirmation */}
-                {remindersCreatedSuccess && (
-                  <div className="p-4 bg-emerald-100/90 rounded-2xl border border-emerald-300 text-emerald-950 text-xs sm:text-sm flex items-center justify-between gap-3 animate-fade-in font-bold">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-700 flex-shrink-0" />
-                      <span>Done. I've added your medicines to your reminders.</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setTab('reminders')}
-                      className="interactive-button px-3.5 py-1.5 bg-emerald-700 text-white rounded-xl text-xs hover:bg-emerald-800 transition-colors shadow-2xs whitespace-nowrap"
-                    >
-                      View in Reminders →
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* STEP 2: NEARBY PHARMACY / MEDICAL STORE PROMPT */}
-              <div className="interactive-card p-6 rounded-3xl bg-slate-900 text-white shadow-md space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Building2 className="w-5 h-5 text-teal-400" />
-                      <h4 className="text-lg font-black text-white">
-                        Would you like to find a nearby medical store for these medicines?
-                      </h4>
-                    </div>
-                    <p className="text-xs sm:text-sm text-slate-300">
-                      Locate verified licensed pharmacies near your coordinates to check medicine availability and pricing.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={handleStartPharmacySearch}
-                      disabled={isLocating}
-                      className="interactive-button px-5 py-3 bg-teal-500 hover:bg-teal-600 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow transition-transform active:scale-95 flex items-center gap-2 disabled:opacity-60"
-                    >
-                      {isLocating ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
-                          <span>Locating...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Compass className="w-4 h-4 text-slate-950" />
-                          <span>Yes, Find Nearby Store</span>
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowPharmacyFinder(false)}
-                      className="interactive-button px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs sm:text-sm rounded-xl border border-slate-700"
-                    >
-                      No, Maybe Later
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* NEARBY PHARMACY LISTINGS SECTION */}
-              {showPharmacyFinder && (
-                <div className="pt-4 border-t border-slate-200 space-y-4 animate-fade-in">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <h4 className="text-xl font-black text-slate-900 flex items-center gap-2">
-                        <Building2 className="w-5 h-5 text-teal-600" />
-                        <span>Nearby Verified Medical Stores</span>
-                      </h4>
-                      <p className="text-xs text-slate-500">
-                        {userLocation ? (
-                          <span>Searching near: <strong>{userLocation.locationName}</strong></span>
-                        ) : (
-                          <span>Regional pharmacy directory. Select a store to check medicine stock.</span>
-                        )}
-                      </p>
-                    </div>
-
-                    <span className="text-xs font-bold text-slate-400">
-                      Sorted by Proximity
-                    </span>
-                  </div>
-
-                  {locationError && (
-                    <div className="p-3 bg-amber-50 border border-amber-300 text-amber-900 text-xs rounded-xl flex items-center justify-between">
-                      <span>{locationError}</span>
-                      <button onClick={() => setLocationError(null)} className="font-bold text-amber-700">✕</button>
-                    </div>
-                  )}
-
-                  {/* Call Initiated Notice */}
-                  {callInitiatedNotice && (
-                    <div className="p-4 bg-teal-50 border border-teal-300 text-teal-950 text-xs sm:text-sm rounded-2xl flex items-start gap-2 animate-fade-in">
-                      <PhoneCall className="w-5 h-5 text-teal-700 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <strong>Calling Interface Triggered:</strong> {callInitiatedNotice}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Pharmacy Cards Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {sortedPharmacies.map((pharm) => (
-                      <div
-                        key={pharm.id}
-                        className="interactive-card p-5 rounded-2xl border border-slate-200 bg-white hover:border-teal-400 hover:shadow-md transition-all flex flex-col justify-between space-y-3"
-                      >
-                        <div className="space-y-1.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <h5 className="font-black text-base text-slate-900">
-                              {pharm.name}
-                            </h5>
-                            {pharm.distanceKm ? (
-                              <span className="px-2.5 py-1 bg-teal-50 text-teal-800 rounded-lg text-xs font-bold whitespace-nowrap">
-                                📍 {pharm.distanceKm} km away
-                              </span>
-                            ) : (
-                              <span className="text-xs text-slate-400 font-medium">{pharm.city}</span>
+                            <h4 className="text-base font-extrabold text-slate-900 dark:text-white">
+                              {med.name}
+                            </h4>
+                            {med.genericName && (
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                {med.genericName}
+                              </p>
                             )}
                           </div>
-
-                          <div className="text-xs text-slate-600 flex items-start gap-1">
-                            <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
-                            <span>{pharm.address}</span>
-                          </div>
-
-                          <div className="flex items-center gap-3 pt-1 text-xs text-slate-500">
-                            <span className="flex items-center gap-1 font-semibold text-emerald-700">
-                              <Clock className="w-3.5 h-3.5" />
-                              {pharm.timings}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Store Call Action Button */}
-                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
-                          <span className="text-xs font-mono font-bold text-slate-600">
-                            {pharm.phone}
-                          </span>
-
                           <button
                             type="button"
-                            onClick={() => setSelectedPharmacyForCall(pharm)}
-                            className="interactive-button px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs shadow flex items-center gap-1.5 transition-transform active:scale-95"
+                            onClick={() => handleRemoveMedicine(med.id)}
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded-lg"
+                            aria-label={`Remove ${med.name}`}
                           >
-                            <Phone className="w-3.5 h-3.5" />
-                            <span>Select Store to Call</span>
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
+
+                        <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
+                          <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200">
+                            {med.dosage}
+                          </span>
+                          <span className="px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300">
+                            {med.frequency}
+                          </span>
+                          <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                            {med.timing}
+                          </span>
+                          <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                            {med.durationDays} days
+                          </span>
+                        </div>
+
+                        {med.instructions && (
+                          <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                            {med.instructions}
+                          </p>
+                        )}
+
+                        {med.uncertainField && (
+                          <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+                            <span>Verify with pharmacist: {med.uncertainField}</span>
+                          </p>
+                        )}
                       </div>
-                    ))}
-                  </div>
+
+                      <div className="pt-2 border-t border-slate-200/70 dark:border-slate-700/70 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReminderModal([med])}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-800 text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-950/50 text-xs font-bold transition-colors"
+                        >
+                          <BellRing className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Create Pill Reminder</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {selectedRx.generalAdvice && (
+                <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/70 dark:border-teal-900/60 text-xs text-teal-900 dark:text-teal-200 flex items-start gap-2">
+                  <ShieldCheck className="w-4 h-4 text-teal-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                  <span>{selectedRx.generalAdvice}</span>
                 </div>
               )}
             </section>
           )}
 
-          {/* C. PRESCRIPTION HISTORY SECTION */}
-          <section className="interactive-card bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <History className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-                <h3 className="font-extrabold text-slate-900 dark:text-white text-lg">
-                  Prescription History ({prescriptionHistory.length})
-                </h3>
-              </div>
-              <span className="text-xs text-slate-500 font-medium">Saved securely for your health records</span>
-            </div>
-
-            {prescriptionHistory.length === 0 ? (
-              <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 space-y-2">
-                <FileText className="w-8 h-8 text-slate-400 mx-auto" />
-                <p className="text-sm font-bold text-slate-700 dark:text-slate-300">No Prescriptions Uploaded Yet</p>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  When you upload or scan a doctor's prescription, it is securely archived here so you can review medicines and dosage anytime.
-                </p>
-              </div>
-            ) : (
+          {/* Prescription History Selector */}
+          {prescriptionHistory.length > 1 && (
+            <section className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+              <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                <History className="w-4 h-4 text-teal-600" aria-hidden="true" />
+                <span>Your Saved Prescriptions ({prescriptionHistory.length})</span>
+              </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {prescriptionHistory.map((rx) => {
-                  const isCurrent = selectedRx?.id === rx.id;
+                  const isActive = selectedRx?.id === rx.id;
                   return (
-                    <div
+                    <button
                       key={rx.id}
-                      onClick={() => handleSelectHistoricalRx(rx)}
-                      className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
-                        isCurrent
-                          ? 'bg-teal-50/80 dark:bg-teal-950/40 border-teal-400 shadow-xs ring-2 ring-teal-200'
-                          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 hover:border-teal-300'
+                      type="button"
+                      onClick={() => {
+                        setSelectedRx(rx);
+                        setEditableMedicines(rx.medicines || []);
+                      }}
+                      className={`text-left p-3.5 rounded-2xl border transition-all ${
+                        isActive
+                          ? 'bg-teal-50 dark:bg-teal-950/50 border-teal-500'
+                          : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 hover:border-teal-400'
                       }`}
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-bold text-teal-800 dark:text-teal-300">
-                            {rx.date ? formatDisplayDate(rx.date) : 'Saved slip'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteHistoricalRx(rx.id, e)}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded-md"
-                            title="Delete prescription"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <h4 className="font-extrabold text-sm text-slate-900 dark:text-white truncate">
-                          {rx.doctorName || 'Prescription Slip'}
-                        </h4>
-                        <p className="text-xs text-slate-500 truncate">
-                          {rx.clinicName || 'Clinic'} • {rx.medicines?.length || 0} medicines
-                        </p>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                        {rx.doctorName}
                       </div>
-                      <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs font-bold text-teal-600 dark:text-teal-400">
-                        <span>{isCurrent ? 'Viewing Active' : 'Review Slip'}</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        {formatDisplayDate(rx.date)} • {rx.medicines?.length || 0} medicines
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
-            )}
-          </section>
+            </section>
+          )}
         </div>
       )}
 
-      {/* ORIGINAL PRESCRIPTION DOCUMENT MODAL (PORTALIZED) */}
-      <PortalModal
-        isOpen={Boolean(showOriginalModal && uploadedImageBlobUrl)}
-        onClose={() => setShowOriginalModal(false)}
-        ariaLabel="Original Prescription Document"
-        backdropClassName="bg-black/80"
-      >
-        {uploadedImageBlobUrl && (
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <div className="flex items-center gap-2">
-                <Eye className="w-5 h-5 text-teal-600" aria-hidden="true" />
-                <h3 className="text-xl font-black text-slate-900">
-                  Original Prescription Document
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowOriginalModal(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-800 font-bold rounded-lg"
-                aria-label="Close modal"
-              >
-                <X className="w-5 h-5" aria-hidden="true" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-auto rounded-2xl bg-slate-100 border border-slate-200 p-2 flex items-center justify-center min-h-[300px]">
-              <img
-                src={uploadedImageBlobUrl}
-                alt="Original uploaded prescription"
-                className="max-h-[60vh] max-w-full object-contain rounded-xl shadow-xs"
-              />
-            </div>
-
-            <div className="p-3 bg-teal-50 border border-teal-200 rounded-xl text-xs text-teal-950 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <span>Compare the AI-extracted medicine cards against your doctor&apos;s handwritten or printed note.</span>
-              <button
-                type="button"
-                onClick={() => setShowOriginalModal(false)}
-                className="interactive-button px-4 py-2 bg-teal-600 text-white font-bold rounded-xl text-xs whitespace-nowrap hover:bg-teal-700"
-              >
-                Back to Extracted Cards
-              </button>
-            </div>
-          </div>
-        )}
-      </PortalModal>
-
-      {/* MODAL: CONFIRM PRESCRIPTION REMINDERS (PORTALIZED) */}
-      <PortalModal
-        isOpen={showReminderConfirmModal}
-        onClose={() => setShowReminderConfirmModal(false)}
-        ariaLabel="Add Prescription to Reminders"
-        backdropClassName="bg-black/70"
-      >
-        <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5">
-          <div className="flex items-start justify-between">
-            <div>
-              <span className="px-3 py-1 bg-teal-100 text-teal-800 rounded-full text-xs font-bold uppercase tracking-wider">
-                One-Time Confirmation
-              </span>
-              <h3 className="text-2xl font-black text-slate-900 mt-2">
-                Add Prescription to Reminders
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600">
-                We&apos;ll create scheduled reminders for all {editableMedicines.length} prescription medicines.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowReminderConfirmModal(false)}
-              aria-label="Close reminders confirmation modal"
-              className="p-1.5 text-slate-400 hover:text-slate-800 font-bold"
-            >
-              <X className="w-5 h-5" aria-hidden="true" />
-            </button>
-          </div>
-
-          {/* Medicines List to Add */}
-          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-            {editableMedicines.map((med) => (
-              <div
-                key={med.id}
-                className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex items-center justify-between"
-              >
-                <div>
-                  <h5 className="font-bold text-slate-900">{med.name} ({med.dosage})</h5>
-                  <p className="text-slate-500">{med.frequency} • {med.timing}</p>
-                </div>
-                <span className="px-2 py-1 bg-teal-50 text-teal-800 font-bold rounded-lg">
-                  {med.durationDays} days
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {/* Preferred Reminder Slot Times */}
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-            <span className="text-xs font-bold uppercase text-slate-500 block">
-              Adjust Daily Reminder Times (If Desired):
-            </span>
-            <div className="grid grid-cols-2 gap-2 text-xs">
+      {/* TAB 2: MY PRESCRIBED MEDICINES (Strictly from user's own uploaded prescriptions) */}
+      {activeTab === 'my_medicines' && (
+        <section className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <label htmlFor="rx-morning-slot" className="text-slate-500 block">Morning Slot:</label>
-                <input
-                  id="rx-morning-slot"
-                  type="time"
-                  value={reminderTimes.morning}
-                  onChange={(e) => setReminderTimes((prev) => ({ ...prev, morning: e.target.value }))}
-                  className="p-1.5 rounded-lg border border-slate-200 w-full font-bold text-slate-800"
-                />
-              </div>
-              <div>
-                <label htmlFor="rx-bedtime-slot" className="text-slate-500 block">Night Slot:</label>
-                <input
-                  id="rx-bedtime-slot"
-                  type="time"
-                  value={reminderTimes.bedtime}
-                  onChange={(e) => setReminderTimes((prev) => ({ ...prev, bedtime: e.target.value }))}
-                  className="p-1.5 rounded-lg border border-slate-200 w-full font-bold text-slate-800"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setShowReminderConfirmModal(false)}
-              className="interactive-button px-4 py-2.5 text-slate-600 font-bold text-sm hover:bg-slate-100 rounded-xl"
-            >
-              Cancel
-            </button>
-
-            <button
-              type="button"
-              onClick={() => createRemindersFromPrescription(editableMedicines)}
-              className="interactive-button px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow transition-transform active:scale-95"
-            >
-              Confirm & Add All
-            </button>
-          </div>
-        </div>
-      </PortalModal>
-
-      {/* MODAL: DUPLICATE REMINDERS RESOLUTION (PORTALIZED) */}
-      <PortalModal
-        isOpen={showDuplicateModal}
-        onClose={() => setShowDuplicateModal(false)}
-        ariaLabel="Duplicate Reminder Notice"
-        backdropClassName="bg-black/70"
-      >
-        <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5">
-          <div className="flex items-start justify-between">
-            <div>
-              <span className="px-3 py-1 bg-amber-100 text-amber-900 rounded-full text-xs font-bold uppercase tracking-wider">
-                Duplicate Reminder Notice
-              </span>
-              <h3 className="text-xl font-black text-slate-900 mt-2">
-                Some Medicines Are Already in Your Reminders
-              </h3>
-              <p className="text-xs text-slate-600">
-                We noticed {duplicateMedsList.length} of these medicines already exist in your active reminders list.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowDuplicateModal(false)}
-              aria-label="Close duplicate reminder modal"
-              className="p-1.5 text-slate-400 hover:text-slate-800 font-bold"
-            >
-              <X className="w-5 h-5" aria-hidden="true" />
-            </button>
-          </div>
-
-          {/* Existing duplicates list */}
-          <div className="space-y-2">
-            {duplicateMedsList.map((m) => (
-              <div
-                key={m.id}
-                className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs flex items-center justify-between"
-              >
-                <span className="font-bold text-amber-950">{m.name} ({m.dosage})</span>
-                <span className="text-[11px] text-amber-800 font-semibold">Already in Reminders</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Options */}
-          <div className="space-y-2 pt-2">
-            <button
-              type="button"
-              onClick={() => createRemindersFromPrescription(newMedsList)}
-              disabled={newMedsList.length === 0}
-              className="interactive-button w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow disabled:opacity-50 text-left px-4 flex items-center justify-between"
-            >
-              <span>Add only missing medicines ({newMedsList.length} new)</span>
-              <ChevronRight className="w-4 h-4" aria-hidden="true" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => createRemindersFromPrescription(editableMedicines)}
-              className="interactive-button w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm rounded-xl text-left px-4 flex items-center justify-between"
-            >
-              <span>Add all medicines anyway (Allow duplicates)</span>
-              <ChevronRight className="w-4 h-4" aria-hidden="true" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowDuplicateModal(false)}
-              className="interactive-button w-full py-2.5 text-slate-500 font-bold text-xs hover:text-slate-800 text-center"
-            >
-              Keep Existing Reminders (Cancel)
-            </button>
-          </div>
-        </div>
-      </PortalModal>
-
-      {/* MODAL: CALL PHARMACY CONFIRMATION & SCRIPT (PORTALIZED) */}
-      <PortalModal
-        isOpen={Boolean(selectedPharmacyForCall)}
-        onClose={() => setSelectedPharmacyForCall(null)}
-        ariaLabel="Pharmacy Call Confirmation"
-        backdropClassName="bg-black/70"
-      >
-        {selectedPharmacyForCall && (
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5">
-            <div className="flex items-start justify-between">
-              <div>
-                <span className="px-3 py-1 bg-teal-100 text-teal-800 rounded-full text-xs font-bold uppercase tracking-wider">
-                  Call Confirmation
-                </span>
-                <h3 className="text-2xl font-black text-slate-900 mt-2">
-                  Call {selectedPharmacyForCall.name}?
-                </h3>
-                <p className="text-xs text-slate-500">
-                  {selectedPharmacyForCall.address} • Phone: {selectedPharmacyForCall.phone}
+                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">
+                  My Prescribed Medicines
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Every medicine listed here comes strictly from your own uploaded or manually saved prescriptions.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedPharmacyForCall(null)}
-                aria-label="Close pharmacy call modal"
-                className="p-1.5 text-slate-400 hover:text-slate-800 font-bold"
+                onClick={handleFindRealPharmacies}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 text-xs font-bold self-start sm:self-auto"
               >
-                <X className="w-5 h-5" aria-hidden="true" />
+                <MapPin className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Locate Real Pharmacies on Map</span>
+                <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
             </div>
 
-            {/* Medicines List to Ask About */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold uppercase text-slate-500 block">
-                Medicines to Inquire About:
-              </span>
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5 max-h-36 overflow-y-auto text-xs">
-                {editableMedicines.map((m) => (
-                  <div key={m.id} className="flex items-center justify-between font-semibold text-slate-800">
-                    <span>• {m.name} ({m.dosage})</span>
-                    <span className="text-slate-500 font-normal">{m.durationDays} days supply</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Suggested Call Script */}
-            <div className="p-4 bg-teal-50 rounded-2xl border border-teal-200 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-teal-950 uppercase flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-teal-600" aria-hidden="true" />
-                  <span>Suggested Call Script (To read to the pharmacist):</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={handleCopyScript}
-                  className="interactive-button px-2 py-1 bg-white border border-teal-300 text-teal-800 font-bold rounded-lg text-[11px] flex items-center gap-1 hover:bg-teal-100 transition-colors shadow-2xs"
-                >
-                  {isScriptCopied ? <Check className="w-3 h-3 text-emerald-600" aria-hidden="true" /> : <Copy className="w-3 h-3" aria-hidden="true" />}
-                  <span>{isScriptCopied ? 'Copied' : 'Copy'}</span>
-                </button>
-              </div>
-              <p className="text-teal-900 leading-relaxed italic bg-white/70 p-3 rounded-xl border border-teal-100">
-                &quot;{callScriptText}&quot;
-              </p>
-            </div>
-
-            <p className="text-[11px] text-slate-400">
-              * Note: Clicking &quot;Call Store&quot; triggers your phone&apos;s native calling interface. This does NOT place an automated order or charge payment.
-            </p>
-
-            {/* Call Action Buttons */}
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setSelectedPharmacyForCall(null)}
-                className="interactive-button px-4 py-2.5 text-slate-600 font-bold text-sm hover:bg-slate-100 rounded-xl"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const pharm = selectedPharmacyForCall;
-                  setSelectedPharmacyForCall(null);
-                  handleConfirmCallStore(pharm);
-                }}
-                className="interactive-button px-6 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow flex items-center gap-2 transition-transform active:scale-95"
-              >
-                <PhoneCall className="w-4 h-4" aria-hidden="true" />
-                <span>Call Store ({selectedPharmacyForCall.phone})</span>
-              </button>
-            </div>
-          </div>
-        )}
-      </PortalModal>
-
-      {/* SUB-VIEW 2: MEDICINE CATALOG */}
-      {activeTab === 'catalog' && (
-        <div className="space-y-6">
-          <section className="interactive-card bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-sm space-y-4">
             <div className="relative">
-              <Search className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
               <input
                 type="text"
-                value={catalogSearch}
-                onChange={(e) => setCatalogSearch(e.target.value)}
-                placeholder="Search catalog by brand name (e.g. Crocin, Telma) or generic ingredient..."
-                className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                value={medicineSearch}
+                onChange={(e) => setMedicineSearch(e.target.value)}
+                placeholder="Search your prescribed medicines by name, generic salt, or doctor..."
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
               />
             </div>
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-              {filteredCatalog.map((item) => (
+          {myPrescribedMedicines.length === 0 ? (
+            <EmptyStateCard
+              icon={<Pill className="w-6 h-6" aria-hidden="true" />}
+              title={
+                medicineSearch.trim()
+                  ? 'No matching medicines in your prescriptions'
+                  : 'No prescribed medicines recorded yet'
+              }
+              description={
+                medicineSearch.trim()
+                  ? 'Try clearing your search query to see all medicines from your saved prescriptions.'
+                  : 'Upload your doctor’s prescription or add a medicine manually to build your personal, verified medicine cabinet.'
+              }
+              actionText={medicineSearch.trim() ? 'Clear Search' : 'Upload a Prescription'}
+              onAction={() => {
+                if (medicineSearch.trim()) {
+                  setMedicineSearch('');
+                } else {
+                  setActiveTab('rx');
+                }
+              }}
+            />
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {myPrescribedMedicines.map((entry) => (
                 <div
-                  key={item.id}
-                  className="interactive-card p-5 rounded-2xl bg-white border border-slate-200 hover:border-teal-300 shadow-sm space-y-3 flex flex-col justify-between"
+                  key={`${entry.prescriptionId}-${entry.medicine.id}`}
+                  className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between gap-4"
                 >
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <h4 className="font-extrabold text-lg text-slate-900">
-                          {item.brandName}
-                        </h4>
-                        <p className="text-xs text-slate-500 font-semibold">
-                          Generic: {item.genericName}
-                        </p>
+                        <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                          {entry.medicine.name}
+                        </h3>
+                        {entry.medicine.genericName && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {entry.medicine.genericName}
+                          </p>
+                        )}
                       </div>
-                      <span className="text-base font-black text-slate-900">
-                        ₹{item.approxPriceRupees}
+                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        {formatDisplayDate(entry.date)}
                       </span>
                     </div>
 
-                    <div className="flex flex-wrap gap-1.5 pt-1 text-xs">
-                      <span className="px-2 py-0.5 bg-slate-100 rounded text-slate-700 font-medium">
-                        {item.form} • {item.packSize}
+                    <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
+                      <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+                        {entry.medicine.dosage}
                       </span>
-                      {item.requiresPrescription ? (
-                        <span className="px-2 py-0.5 bg-rose-100 text-rose-800 rounded font-bold">
-                          Rx Required
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold">
-                          Over The Counter (OTC)
-                        </span>
-                      )}
+                      <span className="px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300">
+                        {entry.medicine.frequency}
+                      </span>
+                      <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                        {entry.medicine.timing}
+                      </span>
                     </div>
 
-                    <p className="text-xs text-slate-600 pt-1">
-                      {item.commonUsePlain}
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      Prescribed by <strong className="text-slate-800 dark:text-slate-200">{entry.doctorName}</strong>
+                      {entry.clinicName ? ` • ${entry.clinicName}` : ''}
                     </p>
+                    {entry.medicine.instructions && (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                        {entry.medicine.instructions}
+                      </p>
+                    )}
                   </div>
 
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-xs text-slate-400 italic">Synthetic catalog item</span>
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{entry.medicine.durationDays} days course</span>
+                    </span>
                     <button
-                      onClick={() => addToCart(item)}
-                      className="interactive-button px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs shadow flex items-center gap-1.5 transition-transform active:scale-95"
+                      type="button"
+                      onClick={() => handleOpenReminderModal([entry.medicine])}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs transition-colors"
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add to Demo Cart</span>
+                      <BellRing className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Create Pill Reminder</span>
                     </button>
                   </div>
                 </div>
               ))}
             </div>
-          </section>
-        </div>
+          )}
+        </section>
       )}
 
-      {/* SUB-VIEW 3: DEMO CART & CHECKOUT */}
-      {activeTab === 'cart' && (
-        <div className="space-y-6">
-          <section className="interactive-card bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-sm space-y-6">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200">
-              <h3 className="text-2xl font-black text-slate-900">
-                Demo Pharmacy Cart
-              </h3>
+      {/* Safety Disclaimer */}
+      <footer className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400 flex items-start gap-2.5">
+        <Info className="w-4 h-4 text-teal-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+        <p>
+          HealYaar organizes your personal prescriptions and medication schedules for convenience. It does not dispense medicines or replace verification by a licensed doctor or pharmacist.
+        </p>
+      </footer>
 
-              {cart.length > 0 && (
-                <button
-                  onClick={clearCart}
-                  className="interactive-button px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg"
-                >
-                  Clear Cart
-                </button>
-              )}
-            </div>
-
-            {cart.length === 0 ? (
-              <div className="py-12 text-center space-y-3">
-                <ShoppingCart className="w-12 h-12 text-slate-300 mx-auto" />
-                <h4 className="text-lg font-bold text-slate-700">Your demo cart is currently empty</h4>
-                <p className="text-xs text-slate-500">
-                  Browse the Medicine Catalog to add simulated items.
-                </p>
-                <button
-                  onClick={() => setActiveTab('catalog')}
-                  className="interactive-button px-5 py-2.5 bg-teal-600 text-white font-bold rounded-xl text-sm"
-                >
-                  Browse Catalog
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {cart.map((entry) => (
-                  <div
-                    key={entry.item.id}
-                    className="interactive-card p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3"
-                  >
-                    <div>
-                      <h4 className="font-bold text-base text-slate-900">
-                        {entry.item.brandName}
-                      </h4>
-                      <div className="text-xs text-slate-500">
-                        {entry.item.genericName} • ₹{entry.item.approxPriceRupees} each
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className="font-bold text-sm text-slate-800">
-                        Qty: {entry.quantity}
-                      </span>
-                      <span className="font-black text-base text-slate-900 min-w-[70px] text-right">
-                        ₹{entry.item.approxPriceRupees * entry.quantity}
-                      </span>
-                      <button
-                        onClick={() => removeFromCart(entry.item.id)}
-                        className="interactive-button p-1.5 text-slate-400 hover:text-red-600 rounded-lg"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Checkout Summary */}
-                <div className="p-6 rounded-2xl bg-slate-900 text-white space-y-4 mt-6">
-                  <div className="flex items-center justify-between text-lg font-black border-b border-slate-700 pb-3">
-                    <span>Estimated Total (Demo Simulation):</span>
-                    <span className="text-2xl text-teal-300">₹{totalCartCost}</span>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setIsDemoOrderCompleted(true);
-                      clearCart();
-                      showToast('Simulated checkout request processed.');
-                    }}
-                    className="interactive-button w-full py-4 bg-teal-500 hover:bg-teal-600 text-slate-950 font-black rounded-xl text-base shadow transition-transform active:scale-95"
-                  >
-                    Simulate Demo Checkout & Verification
-                  </button>
-                </div>
-              </div>
+      {/* Modal: Original Uploaded Prescription Viewer */}
+      <PortalModal
+        isOpen={showOriginalModal && Boolean(uploadedImageBlobUrl)}
+        onClose={() => setShowOriginalModal(false)}
+        ariaLabel="Uploaded prescription slip"
+      >
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+              Original Uploaded Slip {uploadedFileName ? `(${uploadedFileName})` : ''}
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowOriginalModal(false)}
+              className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
+              aria-label="Close modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="overflow-auto rounded-2xl bg-slate-100 dark:bg-slate-950 p-2 flex items-center justify-center">
+            {uploadedImageBlobUrl && (
+              <img
+                src={uploadedImageBlobUrl}
+                alt="Uploaded prescription document"
+                className="max-h-[68vh] w-auto rounded-xl object-contain"
+              />
             )}
-          </section>
+          </div>
         </div>
-      )}
+      </PortalModal>
+
+      {/* Modal: Create Medication Reminders */}
+      <PortalModal
+        isOpen={showReminderConfirmModal}
+        onClose={() => setShowReminderConfirmModal(false)}
+        ariaLabelledBy="rx-reminder-modal-title"
+      >
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3
+                id="rx-reminder-modal-title"
+                className="text-lg font-extrabold text-slate-900 dark:text-white"
+              >
+                Create Pill Reminders
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Customize daily reminder times for {reminderTargetMeds.length} medicine
+                {reminderTargetMeds.length > 1 ? 's' : ''}.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowReminderConfirmModal(false)}
+              className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
+              aria-label="Close reminder dialog"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {(['morning', 'afternoon', 'evening', 'bedtime'] as const).map((slot) => (
+              <div key={slot}>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                  {slot}
+                </label>
+                <input
+                  type="time"
+                  value={reminderTimes[slot]}
+                  onChange={(e) =>
+                    setReminderTimes((prev) => ({ ...prev, [slot]: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-semibold text-slate-900 dark:text-white"
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="max-h-40 overflow-y-auto space-y-1.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 p-3 border border-slate-200 dark:border-slate-700">
+            {reminderTargetMeds.map((med) => (
+              <div key={med.id} className="text-xs flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
+                  {med.name}
+                </span>
+                <span className="text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                  {resolveTimesForFrequency(med.frequency, med.timing).join(', ')}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {remindersCreatedSuccess ? (
+            <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-xs font-bold flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" aria-hidden="true" />
+                <span>Saved to your Reminders schedule!</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReminderConfirmModal(false);
+                  setTab('reminders');
+                }}
+                className="underline"
+              >
+                Open Reminders
+              </button>
+            </div>
+          ) : (
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowReminderConfirmModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCreateReminders}
+                className="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs"
+              >
+                Save Reminders
+              </button>
+            </div>
+          )}
+        </div>
+      </PortalModal>
     </div>
   );
 };

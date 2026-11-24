@@ -882,6 +882,7 @@ export const authService = {
         'food_analyses',
         'activity_logs',
         'consent_records',
+        'favorite_places',
         'user_preferences'
       ];
 
@@ -908,6 +909,68 @@ export const authService = {
     return {
       success: true,
       message: 'All your health records, local RAG vault, and profile data have been permanently deleted.'
+    };
+  },
+
+  /**
+   * DPDP Act 2023 Right to Data Portability: exports all authenticated user records as structured JSON.
+   */
+  async exportAllUserData(user: AuthUser): Promise<Record<string, unknown>> {
+    const userId = user.id;
+    const localSnapshot: Record<string, unknown> = {};
+
+    try {
+      const prefix = `healyaar_user_${userId}_`;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(prefix)) {
+          const raw = localStorage.getItem(key);
+          try {
+            localSnapshot[key.replace(prefix, '')] = raw ? JSON.parse(raw) : null;
+          } catch {
+            localSnapshot[key.replace(prefix, '')] = raw;
+          }
+        }
+      }
+    } catch {
+      // ignore storage read errors
+    }
+
+    const cloudSnapshot: Record<string, unknown> = {};
+    if (isSupabaseConfigured()) {
+      const tables = [
+        'medical_reports',
+        'prescriptions',
+        'medication_reminders',
+        'period_cycles',
+        'meal_logs',
+        'food_analyses',
+        'activity_logs',
+        'favorite_places',
+        'consent_records',
+        'user_preferences'
+      ];
+
+      await Promise.allSettled(
+        tables.map(async (table) => {
+          const { data } = await supabase.from(table).select('*').eq('user_id', userId);
+          if (data) cloudSnapshot[table] = data;
+        })
+      );
+    }
+
+    return {
+      exportedAt: new Date().toISOString(),
+      platform: 'HealYaar (हीलयार)',
+      complianceStandard: 'India DPDP Act 2023 — Right to Data Portability',
+      account: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        emailConfirmed: user.emailConfirmed
+      },
+      cloudRecords: cloudSnapshot,
+      localDeviceVault: localSnapshot
     };
   },
 

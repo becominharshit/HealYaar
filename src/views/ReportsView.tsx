@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { syntheticLabReports } from '../data/syntheticData';
 import { LabTestMetric } from '../types';
 import { SectionHero } from '../components/ui/SectionHero';
 import { MedicalReportsIllustration } from '../components/ContextualIllustrations';
 import { medicalReportService } from '../services/medicalReportService';
 import { authService } from '../services/authService';
+import { aiClient } from '../services/aiClient';
 import { indexMedicalReport, deleteChunksBySource } from '../services/rag/ragVaultService';
 import { formatDisplayDate } from '../utils/healthFormatters';
 import { PortalModal } from '../components/ui/PortalModal';
@@ -15,13 +15,10 @@ import {
   UploadCloud,
   FileText,
   AlertCircle,
-  CheckCircle2,
   HelpCircle,
   Volume2,
   VolumeX,
   Copy,
-  Info,
-  ShieldCheck,
   Sparkles,
   ArrowLeft,
   Trash2,
@@ -41,6 +38,7 @@ export interface AnalyzedReportRecord {
   fileTextContent?: string;
   uploadDate: string;
   isDemo: boolean;
+  poweredBy?: string;
   summary: string;
   keyFindings: string[];
   metrics?: LabTestMetric[];
@@ -48,22 +46,40 @@ export interface AnalyzedReportRecord {
   disclaimer: string;
 }
 
-const STORAGE_KEY = 'healyaar_report_history';
+interface VisionLabReportData {
+  title?: string;
+  labName?: string;
+  reportDate?: string;
+  summary?: string;
+  generalAdvice?: string;
+  questionsForDoctor?: string[];
+  uncertaintyNotes?: string[];
+  metrics?: Array<{
+    name: string;
+    code?: string;
+    value: string;
+    unit?: string;
+    referenceRange?: string;
+    status?: string;
+    plainExplanation?: string;
+    clinicalContext?: string;
+  }>;
+}
+
+const normalizeMetricStatus = (raw?: string): LabTestMetric['status'] => {
+  const lower = (raw || '').toLowerCase();
+  if (lower.includes('low') || lower.includes('below')) return 'low';
+  if (lower.includes('high') || lower.includes('above') || lower.includes('elevated')) return 'high';
+  if (lower.includes('borderline')) return 'borderline';
+  return 'normal';
+};
 
 export const ReportsView: React.FC = () => {
-  const { t, requestPermission, permissions, speakText, stopSpeaking, isAudioPlaying, showToast, currentUser } = useApp();
+  const { requestPermission, permissions, speakText, stopSpeaking, isAudioPlaying, showToast, currentUser } = useApp();
 
-  // -------------------------------------------------------------
-  // Report Page State Machine:
-  // 'empty' | 'selected' | 'analyzing' | 'results'
-  // -------------------------------------------------------------
+  // Report Page State Machine: 'empty' | 'selected' | 'analyzing' | 'results'
   const [pageState, setPageState] = useState<'empty' | 'selected' | 'analyzing' | 'results'>('empty');
-  
-  // Selected unanalyzed file state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isDemoSelected, setIsDemoSelected] = useState<boolean>(false);
-
-  // Active Analyzed Report Result
   const [activeReport, setActiveReport] = useState<AnalyzedReportRecord | null>(null);
 
   // Original Report Modal state
@@ -118,7 +134,6 @@ export const ReportsView: React.FC = () => {
       setReportHistory([]);
       setActiveReport(null);
       setSelectedFile(null);
-      setIsDemoSelected(false);
       setIsOriginalModalOpen(false);
       setPageState('empty');
     };
@@ -126,14 +141,10 @@ export const ReportsView: React.FC = () => {
     return () => window.removeEventListener('healyaar_session_reset', handleReset);
   }, []);
 
-  // -------------------------------------------------------------
   // File Selection Handlers
-  // -------------------------------------------------------------
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
-    setSelectedFile(file);
-    setIsDemoSelected(false);
+    setSelectedFile(e.target.files[0]);
     setPageState('selected');
   };
 
@@ -150,36 +161,27 @@ export const ReportsView: React.FC = () => {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      setSelectedFile(file);
-      setIsDemoSelected(false);
+      setSelectedFile(e.dataTransfer.files[0]);
       setPageState('selected');
     }
   };
 
-  const handleSelectDemo = () => {
-    setSelectedFile(null);
-    setIsDemoSelected(true);
-    setPageState('selected');
-  };
-
   const handleRemoveSelection = () => {
     setSelectedFile(null);
-    setIsDemoSelected(false);
     setPageState('empty');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // -------------------------------------------------------------
-  // Analysis Execution (No Fabricated Lab Values for Real Files)
-  // -------------------------------------------------------------
+  // Analysis Execution via Server-Side Gemini 4 Hydrogen Multimodal Vision (Zero Fabricated Values)
   const handleAnalyze = () => {
-    if (!isDemoSelected && selectedFile && !uploadConsentAccepted) {
-      setUploadConsentError('Please confirm your consent to process this medical report on your device before continuing.');
+    if (!selectedFile) return;
+
+    if (!uploadConsentAccepted) {
+      setUploadConsentError('Please confirm your consent to analyze this medical report before continuing.');
       return;
     }
     setUploadConsentError(null);
-    if (!isDemoSelected && selectedFile && currentUser?.id) {
+    if (currentUser?.id) {
       try {
         localStorage.setItem(`healyaar_user_${currentUser.id}_upload_consent_reports`, 'true');
       } catch {
@@ -190,146 +192,173 @@ export const ReportsView: React.FC = () => {
     setPageState('analyzing');
 
     const executeProcessing = async () => {
-      // Artificial short delay for realistic processing feel
-      await new Promise((resolve) => setTimeout(resolve, 1400));
+      const fileSizeFormatted = `${(selectedFile.size / 1024).toFixed(1)} KB`;
+      let fileDataUrl = '';
+      let fileTextContent: string | undefined;
 
-      if (isDemoSelected) {
-        // Predefined synthetic document explicitly labeled as Demo
-        const demoRecord: AnalyzedReportRecord = {
-          id: `rep-demo-${Date.now()}`,
-          title: 'Complete Blood Count (CBC) with Iron Panel',
-          fileName: 'Sample_CBC_Lab_Report.pdf',
-          fileSizeFormatted: '142 KB',
-          uploadDate: new Date().toLocaleDateString(undefined, {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric'
-          }),
-          isDemo: true,
-          summary:
-            'Mild iron deficiency pattern noted. Hemoglobin and serum ferritin are slightly below typical reference intervals, while white blood cells and platelets are normal.',
-          keyFindings: [
-            'Mild iron deficiency pattern identified in sample data.',
-            'Hemoglobin (10.8 g/dL) is slightly below the standard reference range (13.0 - 17.0 g/dL).',
-            'Serum ferritin is low (14 ng/mL), suggesting depleted iron storage reserves.',
-            'Immune markers (WBC 6,400 cells/uL) and clotting fragments (Platelets 235,000 /uL) are normal.'
-          ],
-          metrics: syntheticLabReports[0].metrics,
-          thingsToDiscuss: [
-            'Do my low hemoglobin and ferritin levels suggest iron-deficiency anemia?',
-            'Would dietary adjustments or iron supplements be appropriate for me?',
-            'Should we repeat a CBC test in 2 to 3 months to monitor my levels?'
-          ],
-          disclaimer:
-            'Synthetic Demo Document for patient education and demonstration. Not real patient data.'
-        };
-
-        const saved = await medicalReportService.saveReport(currentUser?.id || '', demoRecord);
-        if (currentUser?.id) {
-          indexMedicalReport(currentUser.id, {
-            id: saved.id,
-            title: saved.title,
-            date: saved.uploadDate,
-            summary: saved.summary,
-            keyFindings: saved.keyFindings,
-            biomarkers: saved.metrics?.map(m => ({
-              name: m.name,
-              value: m.value,
-              unit: m.unit,
-              status: m.status,
-              normalRange: m.referenceRange
-            }))
-          }).catch(e => console.warn('RAG report indexing failed:', e));
-        }
-        setActiveReport(saved);
-        setReportHistory((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)]);
-        setPageState('results');
-        showToast('Demo report analyzed successfully.');
-        return;
-      }
-
-      if (selectedFile) {
-        // Real user uploaded file: Strictly preserve file info, DO NOT fabricate lab values!
-        const fileSizeFormatted = `${(selectedFile.size / 1024).toFixed(1)} KB`;
-        let fileDataUrl = '';
-        try {
+      try {
+        if (selectedFile.type.startsWith('text/') || selectedFile.name.endsWith('.txt') || selectedFile.name.endsWith('.csv')) {
+          fileTextContent = await selectedFile.text();
+        } else {
           fileDataUrl = await new Promise((resolve) => {
             const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
+            reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
             reader.onerror = () => resolve('');
             reader.readAsDataURL(selectedFile);
           });
-        } catch (e) {
-          // ignore
         }
+      } catch {
+        // ignore file preview read error
+      }
 
-        const cleanTitle = selectedFile.name
-          .replace(/\.[^/.]+$/, '')
-          .replace(/[-_]/g, ' ')
-          .trim();
+      const cleanTitle = selectedFile.name
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[-_]/g, ' ')
+        .trim();
 
-        const realRecord: AnalyzedReportRecord = {
+      const uploadDate = new Date().toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      });
+
+      const supportsVisionMime = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf'].includes(
+        selectedFile.type
+      );
+
+      let realRecord: AnalyzedReportRecord | null = null;
+
+      if (supportsVisionMime) {
+        try {
+          const visionRes = await aiClient.analyzeVision<VisionLabReportData>({
+            visionType: 'lab_report',
+            file: selectedFile
+          });
+          const extracted = visionRes.data || {};
+          const extractedMetrics: LabTestMetric[] = Array.isArray(extracted.metrics)
+            ? extracted.metrics.map((m, idx) => ({
+                id: `m-${Date.now()}-${idx}`,
+                name: m.name || 'Biomarker',
+                code: m.code || '',
+                value: String(m.value ?? ''),
+                unit: m.unit || '',
+                referenceRange: m.referenceRange || 'See lab sheet',
+                status: normalizeMetricStatus(m.status),
+                plainExplanation: m.plainExplanation || 'Review this value with your doctor.',
+                clinicalContext: m.clinicalContext || ''
+              }))
+            : [];
+
+          const findings: string[] = [];
+          if (extracted.labName) findings.push(`Laboratory: ${extracted.labName}`);
+          if (extracted.reportDate) findings.push(`Report Date: ${extracted.reportDate}`);
+          if (extractedMetrics.length > 0) {
+            const flaggedCount = extractedMetrics.filter((m) => m.status !== 'normal').length;
+            findings.push(
+              `Extracted ${extractedMetrics.length} biomarker(s) (${flaggedCount} outside standard reference range).`
+            );
+          }
+          if (extracted.generalAdvice) findings.push(extracted.generalAdvice);
+          if (Array.isArray(extracted.uncertaintyNotes)) {
+            extracted.uncertaintyNotes.forEach((n) => {
+              if (n && n.trim()) findings.push(n.trim());
+            });
+          }
+
+          realRecord = {
+            id: `rep-${Date.now()}`,
+            title: extracted.title && extracted.title.trim() ? extracted.title.trim() : cleanTitle || 'Uploaded Medical Report',
+            fileName: selectedFile.name,
+            fileSizeFormatted,
+            fileDataUrl,
+            fileTextContent,
+            uploadDate,
+            isDemo: false,
+            poweredBy: visionRes.poweredBy || 'Gemini 4 Hydrogen',
+            summary:
+              extracted.summary ||
+              `Report "${selectedFile.name}" analyzed cleanly. Review extracted biomarkers below with your physician.`,
+            keyFindings: findings.length > 0 ? findings : [`Document file: ${selectedFile.name} (${fileSizeFormatted})`],
+            metrics: extractedMetrics.length > 0 ? extractedMetrics : undefined,
+            thingsToDiscuss:
+              Array.isArray(extracted.questionsForDoctor) && extracted.questionsForDoctor.length > 0
+                ? extracted.questionsForDoctor
+                : [
+                    `Review this report (${selectedFile.name}) with your licensed physician.`,
+                    'Confirm whether any flagged values require repeat testing or dietary adjustments.'
+                  ],
+            disclaimer:
+              'AI-extracted educational summary from your uploaded document. Always verify figures against your original laboratory printout and consult a licensed physician.'
+          };
+        } catch (err) {
+          console.warn('Live vision lab extraction unavailable, saving original document without fabricated values:', err);
+        }
+      }
+
+      if (!realRecord) {
+        realRecord = {
           id: `rep-${Date.now()}`,
           title: cleanTitle.length > 2 ? cleanTitle : 'Uploaded Medical Report',
           fileName: selectedFile.name,
           fileSizeFormatted,
           fileDataUrl,
-          uploadDate: new Date().toLocaleDateString(undefined, {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric'
-          }),
+          fileTextContent,
+          uploadDate,
           isDemo: false,
-          summary: `Report "${selectedFile.name}" (${fileSizeFormatted}) securely uploaded and structured for your medical review. Original file preserved on your device.`,
+          summary: `Report "${selectedFile.name}" (${fileSizeFormatted}) was securely saved to your personal Health Vault. Live AI biomarker extraction could not complete for this file right now, so no numerical values were fabricated.`,
           keyFindings: [
             `Document file: ${selectedFile.name}`,
             `Document size: ${fileSizeFormatted}`,
             `Format: ${selectedFile.type || 'Document file'}`,
-            '100% On-Device Privacy: No personal health records were uploaded to third-party ad networks.'
+            'Original file preserved cleanly inside your private account with zero fabricated metrics.'
           ],
-          metrics: undefined, // Non-fabricated: no made-up numerical values!
+          metrics: undefined,
           thingsToDiscuss: [
-            `Review this document (${selectedFile.name}) together during your next doctor consultation.`,
-            `Confirm if the test reference ranges match your local laboratory equipment.`,
-            `Ask if any follow-up tests or lifestyle steps are recommended based on these findings.`
+            `Review this original document (${selectedFile.name}) together during your next doctor consultation.`,
+            'Confirm if the test reference ranges match your local laboratory equipment.',
+            'Ask if any follow-up tests or lifestyle steps are recommended.'
           ],
           disclaimer:
             'This tool organizes your uploaded report for doctor consultation. It does not provide medical diagnosis or replace physician clinical judgment.'
         };
-
-        const saved = await medicalReportService.saveReport(currentUser?.id || '', realRecord, selectedFile);
-        if (currentUser?.id) {
-          indexMedicalReport(currentUser.id, {
-            id: saved.id,
-            title: saved.title,
-            date: saved.uploadDate,
-            summary: saved.summary,
-            keyFindings: saved.keyFindings,
-            biomarkers: saved.metrics?.map(m => ({
-              name: m.name,
-              value: m.value,
-              unit: m.unit,
-              status: m.status,
-              normalRange: m.referenceRange
-            }))
-          }).catch(e => console.warn('RAG report indexing failed:', e));
-        }
-        setActiveReport(saved);
-        setReportHistory((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)]);
-        setPageState('results');
-        showToast('Report uploaded and structured successfully.');
       }
+
+      const saved = await medicalReportService.saveReport(currentUser?.id || '', realRecord, selectedFile);
+      if (currentUser?.id) {
+        indexMedicalReport(currentUser.id, {
+          id: saved.id,
+          title: saved.title,
+          date: saved.uploadDate,
+          summary: saved.summary,
+          keyFindings: saved.keyFindings,
+          biomarkers: saved.metrics?.map((m) => ({
+            name: m.name,
+            value: m.value,
+            unit: m.unit,
+            status: m.status,
+            normalRange: m.referenceRange
+          }))
+        }).catch((e) => console.warn('RAG report indexing failed:', e));
+      }
+      setActiveReport(saved);
+      setReportHistory((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)]);
+      setPageState('results');
+      showToast(
+        saved.poweredBy
+          ? `Report analyzed with ${saved.poweredBy} and indexed into your Health Vault.`
+          : 'Original report archived securely in your Health Vault.'
+      );
     };
 
-    if (!permissions.reportOcr && !isDemoSelected && selectedFile) {
+    if (!permissions.reportOcr) {
       requestPermission(
         'report_ocr',
-        'Document Parsing Permission',
-        `HealYaar processes "${selectedFile.name}" locally in your browser. We never transmit your health documents to external cloud trackers.`,
+        'Document Analysis Permission',
+        `HealYaar sends "${selectedFile.name}" over an authenticated HTTPS connection to extract plain-language lab summaries and saves records strictly to your private account.`,
         executeProcessing
       );
     } else {
-      executeProcessing();
+      void executeProcessing();
     }
   };
 
@@ -441,51 +470,35 @@ export const ReportsView: React.FC = () => {
 
               {/* Upload Button */}
               <label className="cursor-pointer px-6 py-3 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-sm shadow transition-all active:scale-95 inline-flex items-center gap-2">
-                <UploadCloud className="w-4 h-4" />
-                <span>Upload Report</span>
+                <UploadCloud className="w-4 h-4" aria-hidden="true" />
+                <span>Upload Report (PDF, JPG, PNG)</span>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,image/*,.txt,.csv"
+                  accept=".pdf,image/jpeg,image/png,image/webp,.txt,.csv"
                   className="hidden"
                   onChange={handleFileChange}
                 />
               </label>
-
-              {/* Small unobtrusive Demo Document option */}
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={handleSelectDemo}
-                  className="text-xs text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 underline underline-offset-4 font-semibold transition-colors"
-                >
-                  Demo Document
-                </button>
-              </div>
             </div>
           )}
 
           {/* State 2: Report Selected */}
-          {pageState === 'selected' && (
+          {pageState === 'selected' && selectedFile && (
             <div className="p-6 sm:p-8 rounded-3xl border-2 border-teal-500/40 bg-teal-50/40 dark:bg-teal-950/30 space-y-6 text-left animate-fade-in max-w-lg mx-auto">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="p-3 bg-teal-100 dark:bg-teal-900 text-teal-700 dark:text-teal-300 rounded-xl flex-shrink-0">
-                    <FileCheck className="w-6 h-6" />
+                    <FileCheck className="w-6 h-6" aria-hidden="true" />
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-slate-900 dark:text-white truncate text-base">
-                        {isDemoSelected ? 'Sample_CBC_Lab_Report.pdf' : selectedFile?.name}
+                        {selectedFile.name}
                       </span>
-                      {isDemoSelected && (
-                        <span className="px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-[10px] font-bold">
-                          Demo
-                        </span>
-                      )}
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {isDemoSelected ? '142 KB • Synthetic Test File' : `${((selectedFile?.size || 0) / 1024).toFixed(1)} KB`}
+                      {(selectedFile.size / 1024).toFixed(1)} KB
                     </p>
                   </div>
                 </div>
@@ -495,39 +508,38 @@ export const ReportsView: React.FC = () => {
                   onClick={handleRemoveSelection}
                   className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                   title="Remove selected file"
+                  aria-label="Remove selected file"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-5 h-5" aria-hidden="true" />
                 </button>
               </div>
 
-              {/* First-Time Upload Consent Checkbox (Real Uploads) */}
-              {!isDemoSelected && selectedFile && (
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="report-upload-consent"
-                    className="flex items-start gap-2.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-200 dark:border-teal-800 cursor-pointer text-xs text-slate-700 dark:text-slate-300"
-                  >
-                    <input
-                      id="report-upload-consent"
-                      type="checkbox"
-                      checked={uploadConsentAccepted}
-                      onChange={(e) => {
-                        setUploadConsentAccepted(e.target.checked);
-                        if (e.target.checked) setUploadConsentError(null);
-                      }}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500 flex-shrink-0"
-                    />
-                    <span>
-                      I consent to HealYaar processing this medical report locally for plain-language educational summary and indexing it privately inside my user-scoped Health Vault (not diagnostic).
-                    </span>
-                  </label>
-                  {uploadConsentError && (
-                    <p role="alert" className="text-xs font-semibold text-rose-600 dark:text-rose-400">
-                      {uploadConsentError}
-                    </p>
-                  )}
-                </div>
-              )}
+              {/* First-Time Upload Consent Checkbox */}
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="report-upload-consent"
+                  className="flex items-start gap-2.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-200 dark:border-teal-800 cursor-pointer text-xs text-slate-700 dark:text-slate-300"
+                >
+                  <input
+                    id="report-upload-consent"
+                    type="checkbox"
+                    checked={uploadConsentAccepted}
+                    onChange={(e) => {
+                      setUploadConsentAccepted(e.target.checked);
+                      if (e.target.checked) setUploadConsentError(null);
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500 flex-shrink-0"
+                  />
+                  <span>
+                    I consent to HealYaar analyzing this medical report for plain-language educational summary and indexing it privately inside my user-scoped Health Vault (not diagnostic).
+                  </span>
+                </label>
+                {uploadConsentError && (
+                  <p role="alert" className="text-xs font-semibold text-rose-600 dark:text-rose-400">
+                    {uploadConsentError}
+                  </p>
+                )}
+              </div>
 
               <div className="flex items-center gap-3 pt-2">
                 <button
@@ -578,12 +590,11 @@ export const ReportsView: React.FC = () => {
               onClick={() => {
                 setPageState('empty');
                 setSelectedFile(null);
-                setIsDemoSelected(false);
               }}
               className="inline-flex items-center gap-2 text-sm font-bold text-teal-700 dark:text-teal-300 hover:text-teal-800"
             >
               <ArrowLeft className="w-4 h-4" />
-              <span>Back to Upload & History</span>
+              <span>Back to Upload &amp; History</span>
             </button>
 
             <div className="flex items-center gap-2">
@@ -621,13 +632,14 @@ export const ReportsView: React.FC = () => {
 
           {/* Report Header Title */}
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-2xl font-black text-slate-900 dark:text-white">
                 {activeReport.title}
               </h2>
-              {activeReport.isDemo && (
-                <span className="px-2.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300 text-xs font-bold border border-purple-200 dark:border-purple-800">
-                  Demo Document
+              {activeReport.poweredBy && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 text-xs font-bold border border-teal-200 dark:border-teal-800">
+                  <Sparkles className="w-3 h-3" aria-hidden="true" />
+                  <span>Powered by {activeReport.poweredBy}</span>
                 </span>
               )}
             </div>
@@ -788,11 +800,6 @@ export const ReportsView: React.FC = () => {
                       <span className="font-bold text-slate-900 dark:text-white text-sm truncate">
                         {rep.title}
                       </span>
-                      {rep.isDemo && (
-                        <span className="px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-300 text-[10px] font-bold">
-                          Demo
-                        </span>
-                      )}
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
                       {rep.fileName} • {formatDisplayDate(rep.uploadDate)}
@@ -885,7 +892,7 @@ export const ReportsView: React.FC = () => {
                         {activeReport.title}
                       </h4>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {activeReport.isDemo ? 'Structured Lab Sheet (Demo Document)' : 'Archived Clinical Record'} • {formatDisplayDate(activeReport.uploadDate)}
+                        Archived Clinical Record • {formatDisplayDate(activeReport.uploadDate)}
                       </p>
                     </div>
                   </div>

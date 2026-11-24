@@ -1,6 +1,6 @@
-import { GoogleGenAI } from '@google/genai';
 import { ChatMessage, ClinicianSOAPNote, NavTab } from '../../types';
 import { retrieveContext, RAGRetrievalResult } from './retrievalService';
+import { aiClient } from '../aiClient';
 
 // Red-flag emergency keyword detector
 export function detectEmergency(query: string): boolean {
@@ -260,78 +260,50 @@ export async function generateRAGAssistantResponse(
     minScore: 0.12
   });
 
-  const soapNote = mode === 'clinician' ? buildClinicianSOAPNote(userQuery, ragResult) : undefined;
+  const fallbackSoapNote = mode === 'clinician' ? buildClinicianSOAPNote(userQuery, ragResult) : undefined;
   const queryParts = extractQueryParts(userQuery);
 
-  const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.GEMINI_API_KEY;
+  const personalContext = (ragResult.personalSources || [])
+    .map((s) => `[${s.chunk.title}]\n${s.chunk.content}`)
+    .join('\n\n');
 
-  // 3. ATTEMPT GEMINI LLM GENERATION IF API KEY CONFIGURED
-  if (apiKey && apiKey !== 'undefined' && apiKey.length > 10) {
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const partsChecklist = queryParts.map((part, i) => `  Part ${i + 1}: "${part}"`).join('\n');
+  const clinicalContext = (ragResult.clinicalSources || [])
+    .map((s) => `[${s.chunk.title}]\n${s.chunk.content}`)
+    .join('\n\n');
 
-      const prompt = mode === 'clinician'
-        ? `You are HealYaar Clinician Copilot, an evidence-grounded clinical documentation assistant.
-Summarize the retrieved Dual-Layer RAG evidence concisely for a licensed clinician reviewing this patient case.
-Explicitly address EVERY part of the query below using ALL relevant personal records and clinical guidelines provided.
-Do NOT fabricate lab values not present in context. Highlight uncertainty and drug-interaction precautions clearly.
+  // 3. CALL SERVER-SIDE /api/ai PROXY (gemini-4-hydrogen — ZERO client API key exposure)
+  try {
+    const liveResponse = await aiClient.chat({
+      query: userQuery,
+      personalContext,
+      clinicalContext,
+      queryParts,
+      mode
+    });
 
-Query Parts to Address:
-${partsChecklist}
-
-${ragResult.contextPromptBlock}
-
-Clinician Query: "${userQuery}"
-
-Format cleanly using Markdown headings (**Clinical Synthesis**, **Vault Record Findings**, **Guideline Alignment**, **Key Precautions**) and concise bullet points.`
-        : `You are HealYaar, an empathetic, accessible healthcare companion for patients in India.
-Explain medical terms, lab results, prescriptions, nutrition, and symptoms in simple, clear, everyday language.
-Do NOT give medical diagnoses or prescribe medications.
-CRITICAL: If the patient asks a multi-part question, explicitly address EVERY part using ALL relevant personal records and clinical guidelines below.
-
-Query Parts to Answer Completely:
-${partsChecklist}
-
-${ragResult.contextPromptBlock}
-
-Patient Query: "${userQuery}"
-
-Provide a structured, compassionate Markdown response:
-1. Answer each part of the patient's question clearly with short bold headings.
-2. If personal records were found in the context above, cite them specifically (e.g. "From your saved report...").
-3. Reference ALL relevant clinical guidelines retrieved (e.g., both lab interpretation AND nutrition/absorption tips if asked).
-4. Give practical, non-diagnostic next steps or questions to ask their doctor.`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
-        contents: prompt
-      });
-
-      const responseText = response.text?.trim();
-      if (responseText && responseText.length > 20) {
-        return {
-          id: `bot-rag-${Date.now()}`,
-          sender: 'assistant',
-          copilotMode: mode,
-          soapNote,
-          text: responseText,
-          timestamp,
-          ragSources: ragResult.allSources,
-          uncertaintyNote: mode === 'clinician'
-            ? "Clinician Copilot draft — must be verified and signed off by a licensed practitioner before entering the medical record."
-            : "HealYaar provides educational guidance grounded in your records. Always verify medical decisions with your doctor.",
-          suggestedFollowUps: generateFollowUps(userQuery),
-          nextSteps: determineNextSteps(userQuery)
-        };
-      }
-    } catch {
-      // Fall through to deterministic clinical RAG reasoning engine
+    if (liveResponse?.text && liveResponse.text.length > 15) {
+      return {
+        id: `bot-rag-${Date.now()}`,
+        sender: 'assistant',
+        copilotMode: mode,
+        soapNote: mode === 'clinician' ? (liveResponse.soapNote || fallbackSoapNote) : undefined,
+        text: liveResponse.text,
+        timestamp,
+        poweredBy: liveResponse.poweredBy || 'Gemini 4 Hydrogen',
+        ragSources: ragResult.allSources,
+        uncertaintyNote: mode === 'clinician'
+          ? 'Clinician Copilot draft powered by Gemini 4 Hydrogen — must be verified and signed off by a licensed practitioner before entering the medical record.'
+          : 'HealYaar provides educational guidance grounded in your records. Always verify medical decisions with your doctor.',
+        suggestedFollowUps: generateFollowUps(userQuery),
+        nextSteps: determineNextSteps(userQuery)
+      };
     }
+  } catch {
+    // Graceful local RAG fallback ONLY when /api/ai is unreachable
   }
 
-  // 4. HIGH-FIDELITY GROUNDED CLINICAL RAG REASONING ENGINE (OFFLINE / FALLBACK)
-  return buildGroundedRuleResponse(userQuery, ragResult, timestamp, mode, soapNote);
+  // 4. DETERMINISTIC CLINICAL RAG FALLBACK (ONLY WHEN /api/ai IS UNREACHABLE)
+  return buildGroundedRuleResponse(userQuery, ragResult, timestamp, mode, fallbackSoapNote);
 }
 
 /**

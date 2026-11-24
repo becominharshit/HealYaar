@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { VoiceAssistantProvider } from './context/VoiceAssistantContext';
 import { Navbar } from './components/Navbar';
@@ -31,7 +31,7 @@ import { RefundPolicyView } from './views/RefundPolicyView';
 import { EmailVerificationPrompt } from './components/EmailVerificationPrompt';
 import { AuthCallbackRecovery } from './components/AuthCallbackRecovery';
 
-import { Heart, AlertOctagon, Sparkles, Loader2 } from 'lucide-react';
+import { Heart, AlertOctagon, Sparkles, Loader2, X } from 'lucide-react';
 
 const EMAIL_VERIFICATION_PROTECTED_TABS: NavTab[] = ['reports', 'medicines', 'period', 'reminders'];
 
@@ -68,6 +68,42 @@ const MainLayout: React.FC = () => {
     authCallbackError,
     clearAuthCallbackError
   } = useApp();
+
+  const [quotaBanner, setQuotaBanner] = useState(false);
+
+  useEffect(() => {
+    const onQuotaExceeded = () => setQuotaBanner(true);
+    window.addEventListener('gmp-quota-exceeded', onQuotaExceeded);
+    return () => window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
+  }, []);
+
+  const renderQuotaBanner = () =>
+    quotaBanner ? (
+      <div
+        role="alert"
+        className="sticky top-0 z-50 bg-amber-50 dark:bg-amber-950/95 border-b border-amber-300 dark:border-amber-800 px-4 py-2 text-xs text-amber-950 dark:text-amber-100 flex items-center justify-between gap-3"
+      >
+        <p className="font-medium">
+          Google Maps demo quota exceeded. To lift this limit, configure your own Google Maps Platform billing key.{' '}
+          <a
+            href="https://developers.google.com/maps/documentation/javascript/error-messages?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline font-bold hover:text-amber-700 dark:hover:text-amber-300"
+          >
+            Learn more
+          </a>
+        </p>
+        <button
+          type="button"
+          onClick={() => setQuotaBanner(false)}
+          aria-label="Dismiss Google Maps quota notice"
+          className="p-1 rounded-lg hover:bg-amber-200/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 flex-shrink-0"
+        >
+          <X className="w-4 h-4" aria-hidden="true" />
+        </button>
+      </div>
+    ) : null;
 
   // 1. Session verification loading state: prevent content flash (FOUC)
   if (isAuthLoading) {
@@ -169,6 +205,7 @@ const MainLayout: React.FC = () => {
 
     return (
       <div className="min-h-screen flex flex-col bg-[#fbfbfa] dark:bg-[#090d16] text-slate-900 dark:text-slate-100">
+        {renderQuotaBanner()}
         <ErrorBoundary onNavigateHome={() => setTab('landing')}>
           {renderPublicView()}
         </ErrorBoundary>
@@ -239,6 +276,7 @@ const MainLayout: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-transparent text-slate-900 dark:text-slate-100 transition-colors duration-200">
+      {renderQuotaBanner()}
       {/* Skip to Main Content Link for Screen Readers & Keyboard Accessibility */}
       <a
         href="#main-content"

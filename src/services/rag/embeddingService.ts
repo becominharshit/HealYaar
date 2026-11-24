@@ -1,5 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
 import { filterRAGStopWords } from '../../utils/healthFormatters';
+import { aiClient } from '../aiClient';
 
 const VECTOR_DIMENSION = 128;
 
@@ -194,30 +194,17 @@ export function computeDenseLocalEmbedding(text: string, dim = VECTOR_DIMENSION)
 }
 
 /**
- * Compute semantic embedding using Gemini API if key is available,
- * falling back gracefully to the deterministic dense vector embedding.
+ * Compute semantic embedding via server-side /api/ai (gemini-embedding-2),
+ * falling back gracefully to deterministic local dense embedding only if /api/ai is unreachable.
  */
 export async function computeEmbedding(text: string): Promise<number[]> {
-  const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.GEMINI_API_KEY;
-
-  if (apiKey && apiKey !== 'undefined' && apiKey.length > 10) {
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.embedContent({
-        model: 'gemini-embedding-2',
-        contents: text
-      });
-
-      const resp = response as any;
-      if (resp?.embedding?.values) {
-        return resp.embedding.values;
-      }
-      if (resp?.embeddings?.[0]?.values) {
-        return resp.embeddings[0].values;
-      }
-    } catch {
-      // Graceful fallback to deterministic local embedding
+  try {
+    const embedding = await aiClient.embed(text);
+    if (embedding.length > 0) {
+      return embedding;
     }
+  } catch {
+    // Graceful fallback to deterministic local dense embedding when /api/ai is offline
   }
 
   return computeDenseLocalEmbedding(text);

@@ -64,6 +64,28 @@ export interface ChatMessage {
   plainLanguageGlossary?: { term: string; explanation: string }[];
   copilotMode?: 'patient' | 'clinician';
   soapNote?: ClinicianSOAPNote;
+  poweredBy?: string;
+}
+
+export interface GoogleMapsGroundingSource {
+  title: string;
+  uri: string;
+  placeId?: string;
+  reviewSnippets?: { title: string; uri: string }[];
+}
+
+export interface FavoritePlace {
+  id: string;
+  userId?: string;
+  placeName: string;
+  category: string;
+  address: string;
+  lat: number;
+  lng: number;
+  mapsUrl: string;
+  phone?: string;
+  notes?: string;
+  createdAt?: string;
 }
 
 export interface LabTestMetric {

@@ -42,7 +42,7 @@ export const supabase: SupabaseClient = createClient(fallbackUrl, fallbackKey, {
 
 if (!isSupabaseConfigured()) {
   console.info(
-    '%c[HealYaar Notice] Supabase environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) are not configured. The app will run in demo/offline-resilient mode until real credentials are provided in .env.',
+    '%c[HealYaar Notice] Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment to enable live cloud sync and authentication.',
     'color: #0d9488; font-weight: bold;'
   );
 }
