@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HealYaar — Completing Sign-In</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #f8fafc;
+        color: #0f172a;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #090d16;
+          color: #f8fafc;
+        }
+        .card {
+          background: #111827;
+          border-color: #1e293b;
+        }
+        .muted {
+          color: #94a3b8;
+        }
+      }
+      .card {
+        width: 100%;
+        max-width: 380px;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 24px;
+        padding: 32px 24px;
+        text-align: center;
+        box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.08);
+      }
+      .badge {
+        width: 48px;
+        height: 48px;
+        margin: 0 auto 16px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #0d9488, #34d399);
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 22px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 18px;
+        font-weight: 800;
+      }
+      .muted {
+        margin: 0 0 20px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #475569;
+      }
+      button {
+        display: none;
+        width: 100%;
+        padding: 10px 16px;
+        border: none;
+        border-radius: 14px;
+        background: #0d9488;
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #0f766e;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card" role="main">
+      <div class="badge" aria-hidden="true">H</div>
+      <h1 id="status-title">Completing Google Sign-In...</h1>
+      <p id="status-desc" class="muted">
+        Please wait a moment while we securely connect your HealYaar session.
+      </p>
+      <button id="close-btn" type="button">Close Window</button>
+    </main>
+
+    <script>
+      (function () {
+        var MESSAGE_TYPE = 'HEALYAAR_OAUTH_CALLBACK';
+        var CHANNEL_NAME = 'healyaar_oauth_channel';
+        var STORAGE_KEY = 'healyaar_oauth_popup_result';
+        var POPUP_NAME = 'healyaar_google_oauth';
+
+        var titleEl = document.getElementById('status-title');
+        var descEl = document.getElementById('status-desc');
+        var closeBtn = document.getElementById('close-btn');
+
+        closeBtn.addEventListener('click', function () {
+          window.close();
+        });
+
+        var searchParams = new URLSearchParams(window.location.search || '');
+        var rawHash = window.location.hash || '';
+        var hashParams = new URLSearchParams(
+          rawHash.startsWith('#') ? rawHash.slice(1) : rawHash
+        );
+
+        function getParam(key) {
+          return hashParams.get(key) || searchParams.get(key) || null;
+        }
+
+        var payload = {
+          type: MESSAGE_TYPE,
+          code: getParam('code'),
+          accessToken: getParam('access_token'),
+          refreshToken: getParam('refresh_token'),
+          errorCode: getParam('error_code') || getParam('error'),
+          errorDescription: getParam('error_description') || getParam('message')
+        };
+
+        var hasOpener = Boolean(window.opener && window.opener !== window);
+        var isPopupContext = hasOpener || window.name === POPUP_NAME;
+
+        if (!isPopupContext) {
+          // Standard full-page redirect flow (non-iframe browser): forward to SPA root
+          var target = '/' + (window.location.search || '') + (window.location.hash || '');
+          window.location.replace(target);
+          return;
+        }
+
+        var delivered = false;
+
+        // 1. Primary cross-partition safe channel: window.opener.postMessage (strict same-origin)
+        if (hasOpener) {
+          try {
+            window.opener.postMessage(payload, window.location.origin);
+            delivered = true;
+          } catch (_err) {
+            // Opener may be closed or inaccessible
+          }
+        }
+
+        // 2. Same-origin BroadcastChannel fallback (helps when COOP severs window.opener)
+        try {
+          if (typeof BroadcastChannel !== 'undefined') {
+            var channel = new BroadcastChannel(CHANNEL_NAME);
+            channel.postMessage(payload);
+            setTimeout(function () {
+              channel.close();
+            }, 250);
+            delivered = true;
+          }
+        } catch (_err) {
+          // Ignore BroadcastChannel unavailability
+        }
+
+        // 3. Same-origin storage event fallback
+        try {
+          localStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({
+              type: payload.type,
+              code: payload.code,
+              accessToken: payload.accessToken,
+              refreshToken: payload.refreshToken,
+              errorCode: payload.errorCode,
+              errorDescription: payload.errorDescription,
+              ts: Date.now()
+            })
+          );
+          delivered = true;
+        } catch (_err) {
+          // Ignore storage errors
+        }
+
+        if (payload.errorCode || payload.errorDescription) {
+          titleEl.textContent = 'Sign-In Not Completed';
+          descEl.textContent =
+            'You can close this window and return to HealYaar to try again.';
+        } else if (delivered) {
+          titleEl.textContent = 'Google Sign-In Complete';
+          descEl.textContent =
+            'Returning to HealYaar now. This window will close automatically.';
+        } else {
+          titleEl.textContent = 'Return to HealYaar';
+          descEl.textContent =
+            'Sign-in finished. Please close this window and refresh HealYaar.';
+        }
+
+        closeBtn.style.display = 'inline-block';
+
+        setTimeout(function () {
+          try {
+            window.close();
+          } catch (_err) {
+            // Browser prevented auto-close; manual button remains visible
+          }
+        }, 350);
+      })();
+    </script>
+  </body>
+</html>

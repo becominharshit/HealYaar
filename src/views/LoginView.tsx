@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { AuthIllustration } from '../components/ContextualIllustrations';
 import { authService, isValidEmail } from '../services/authService';
+import { isSafeAvatarUrl } from '../services/oauthPopupHelpers';
 import {
   Heart,
   Mail,
@@ -24,15 +25,14 @@ export const LoginView: React.FC = () => {
     currentUser,
     isAuthenticated,
     login,
+    loginWithGoogle,
     signup,
     logout,
     requestPasswordReset,
     updatePassword,
-    tab,
     setTab,
     intendedTab,
-    setIntendedTab,
-    showToast
+    setIntendedTab
   } = useApp();
 
   // Mode: 'login' | 'signup' | 'forgot_password' | 'reset_password'
@@ -59,6 +59,7 @@ export const LoginView: React.FC = () => {
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorField, setErrorField] = useState<'name' | 'email' | 'password' | 'confirmPassword' | 'general' | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -100,10 +101,40 @@ export const LoginView: React.FC = () => {
     }
   };
 
+  // Google OAuth Sign-In handler
+  const handleGoogleSignIn = async () => {
+    if (isSubmitting || isGoogleSubmitting) return;
+    setErrorMessage(null);
+    setErrorField(null);
+    setInfoMessage(null);
+    setIsGoogleSubmitting(true);
+
+    try {
+      const result = await loginWithGoogle();
+      if (result.success) {
+        if (result.user) {
+          const destination = intendedTab || 'home';
+          setIntendedTab(null);
+          setTab(destination);
+        } else if (result.message) {
+          setInfoMessage(result.message);
+        }
+      } else {
+        setErrorMessage(result.error || 'Google sign-in could not be completed. Please try again.');
+        setErrorField('general');
+      }
+    } catch {
+      setErrorMessage('A connection error occurred while connecting to Google. Please try again.');
+      setErrorField('general');
+    } finally {
+      setIsGoogleSubmitting(false);
+    }
+  };
+
   // Form submission handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitting || isGoogleSubmitting) return;
 
     setErrorMessage(null);
     setErrorField(null);
@@ -263,9 +294,18 @@ export const LoginView: React.FC = () => {
     return (
       <div className="max-w-xl mx-auto py-12 px-4 animate-fade-in">
         <div className="interactive-card bg-white dark:bg-slate-900 rounded-3xl p-8 sm:p-10 border border-slate-200/80 dark:border-slate-800 shadow-sm text-center space-y-6">
-          <div className="w-16 h-16 mx-auto rounded-3xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200/60 dark:border-teal-800/60 text-teal-600 dark:text-teal-400 flex items-center justify-center">
-            <CheckCircle2 className="w-8 h-8" />
-          </div>
+          {isSafeAvatarUrl(currentUser.avatarUrl) ? (
+            <img
+              src={currentUser.avatarUrl!}
+              alt={currentUser.name}
+              referrerPolicy="no-referrer"
+              className="w-16 h-16 mx-auto rounded-3xl object-cover border-2 border-teal-200 dark:border-teal-800 shadow-xs"
+            />
+          ) : (
+            <div className="w-16 h-16 mx-auto rounded-3xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200/60 dark:border-teal-800/60 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+          )}
 
           <div className="space-y-2">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-xs font-bold border border-emerald-200/60 dark:border-emerald-800/60">
@@ -442,6 +482,61 @@ export const LoginView: React.FC = () => {
               >
                 <CheckCircle2 className="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0 mt-0.5" />
                 <span className="font-medium leading-relaxed">{infoMessage}</span>
+              </div>
+            )}
+
+            {/* Google Sign-In Option (Shown in Login & Sign Up modes) */}
+            {(authMode === 'login' || authMode === 'signup') && (
+              <div className="space-y-4">
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={isSubmitting || isGoogleSubmitting}
+                  className="interactive-button w-full py-3 px-5 rounded-2xl bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 font-bold text-sm shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-3 transition-all active:scale-[0.98]"
+                >
+                  {isGoogleSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-teal-600 dark:text-teal-400" />
+                      <span>Connecting to Google...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        className="w-5 h-5 flex-shrink-0"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fill="#4285F4"
+                          d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
+                        />
+                        <path
+                          fill="#34A853"
+                          d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z"
+                        />
+                        <path
+                          fill="#FBBC05"
+                          d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"
+                        />
+                        <path
+                          fill="#EA4335"
+                          d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"
+                        />
+                      </svg>
+                      <span>
+                        {authMode === 'signup' ? 'Sign up with Google' : 'Continue with Google'}
+                      </span>
+                    </>
+                  )}
+                </button>
+
+                <div className="relative flex items-center py-0.5" aria-hidden="true">
+                  <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
+                  <span className="flex-shrink mx-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    or continue with email
+                  </span>
+                  <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
+                </div>
               </div>
             )}
 
@@ -637,7 +732,7 @@ export const LoginView: React.FC = () => {
               <div className="pt-2">
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isGoogleSubmitting}
                   className="interactive-button w-full py-3.5 px-6 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm sm:text-base shadow-xs disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
                 >
                   {isSubmitting ? (

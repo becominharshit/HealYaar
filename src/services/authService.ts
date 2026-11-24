@@ -1,5 +1,21 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { getAuthRedirectUrl } from './authCallbackService';
+import {
+  getAuthRedirectUrl,
+  getOAuthCallbackUrl,
+  completeOAuthCallbackPayload
+} from './authCallbackService';
+import {
+  OAUTH_BROADCAST_CHANNEL,
+  OAUTH_POPUP_STORAGE_KEY,
+  OAUTH_POPUP_WINDOW_NAME,
+  buildPopupFeatures,
+  isAllowedMessageOrigin,
+  isValidOAuthAuthorizeUrl,
+  mapGoogleOAuthError,
+  parseOAuthCallbackPayload,
+  shouldUsePopupForOAuth,
+  OAuthCallbackPayload
+} from './oauthPopupHelpers';
 import { User, Session } from '@supabase/supabase-js';
 
 /**
@@ -140,9 +156,16 @@ export function mapSupabaseUserToAuthUser(sbUser: User, rememberMe = true): Auth
     sbUser.user_metadata?.name ||
     (sbUser.email ? sbUser.email.split('@')[0] : 'HealYaar Member');
 
+  const isOAuthProvider =
+    sbUser.app_metadata?.provider === 'google' ||
+    (Array.isArray(sbUser.app_metadata?.providers) &&
+      sbUser.app_metadata.providers.includes('google'));
+
   const isConfirmed = Boolean(
     sbUser.email_confirmed_at ||
-    (sbUser as any).confirmed_at
+    (sbUser as any).confirmed_at ||
+    sbUser.user_metadata?.email_verified ||
+    isOAuthProvider
   );
 
   const email = sbUser.email || '';
@@ -154,7 +177,7 @@ export function mapSupabaseUserToAuthUser(sbUser: User, rememberMe = true): Auth
     emailOrPhone: email,
     rememberMe,
     loginDate: new Date().toISOString(),
-    avatarUrl: sbUser.user_metadata?.avatar_url || null,
+    avatarUrl: sbUser.user_metadata?.avatar_url || sbUser.user_metadata?.picture || null,
     emailConfirmed: isConfirmed
   };
 }
@@ -314,6 +337,235 @@ export const authService = {
       return { success: true, user: authUser };
     } catch (err: any) {
       return { success: false, error: err.message || 'Login failed. Please try again.', field: 'general' };
+    }
+  },
+
+  /**
+   * Ensures a public.profiles record exists for an authenticated user (e.g. first Google OAuth login)
+   */
+  async ensureUserProfile(sbUser: User): Promise<void> {
+    if (!isSupabaseConfigured() || !sbUser?.id) return;
+    try {
+      const mapped = mapSupabaseUserToAuthUser(sbUser);
+      await supabase.from('profiles').upsert(
+        {
+          id: sbUser.id,
+          full_name: mapped.name,
+          email: mapped.email,
+          avatar_url: mapped.avatarUrl || null
+        },
+        { onConflict: 'id' }
+      );
+    } catch (profileErr) {
+      console.warn('OAuth profile sync notice:', profileErr);
+    }
+  },
+
+  /**
+   * Sign In / Sign Up with Google via Supabase Auth OAuth.
+   * Uses a direct-to-provider popup flow when embedded in an iframe (e.g., AI Studio preview)
+   * and standard redirect flow when opened at top-level.
+   */
+  async signInWithGoogle(): Promise<AuthResult> {
+    if (!isSupabaseConfigured()) {
+      return {
+        success: false,
+        error:
+          'Google Sign-In requires Supabase to be configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment, then enable Google in Supabase Auth.',
+        field: 'general'
+      };
+    }
+
+    try {
+      const redirectTo = getOAuthCallbackUrl();
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          skipBrowserRedirect: true,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'select_account'
+          }
+        }
+      });
+
+      if (error) {
+        return {
+          success: false,
+          error: mapGoogleOAuthError(error),
+          field: 'general'
+        };
+      }
+
+      if (!data?.url || !isValidOAuthAuthorizeUrl(data.url)) {
+        return {
+          success: false,
+          error: 'Could not start Google Sign-In. Please verify Google OAuth is enabled in Supabase.',
+          field: 'general'
+        };
+      }
+
+      let isInIframe = false;
+      try {
+        isInIframe = window.self !== window.top;
+      } catch {
+        // Cross-origin frame access throws SecurityError -> definitely inside an iframe
+        isInIframe = true;
+      }
+
+      if (!shouldUsePopupForOAuth(isInIframe)) {
+        window.location.assign(data.url);
+        return {
+          success: true,
+          message: 'Redirecting to Google...'
+        };
+      }
+
+      // Iframe-safe popup flow: open OAuth provider URL directly in a centered popup window
+      const features = buildPopupFeatures(
+        window.outerWidth || window.innerWidth || 1280,
+        window.outerHeight || window.innerHeight || 800,
+        window.screenX || 0,
+        window.screenY || 0
+      );
+
+      // Clear any stale popup payload before launching
+      try {
+        localStorage.removeItem(OAUTH_POPUP_STORAGE_KEY);
+      } catch {
+        // ignore storage errors
+      }
+
+      const popup = window.open(data.url, OAUTH_POPUP_WINDOW_NAME, features);
+      if (!popup) {
+        return {
+          success: false,
+          error: mapGoogleOAuthError('popup_blocked'),
+          field: 'general'
+        };
+      }
+
+      return await new Promise<AuthResult>((resolve) => {
+        let settled = false;
+        let broadcastChannel: BroadcastChannel | null = null;
+        let closePollTimer: number | null = null;
+        let timeoutTimer: number | null = null;
+
+        const cleanup = () => {
+          window.removeEventListener('message', handleMessage);
+          window.removeEventListener('storage', handleStorage);
+          if (broadcastChannel) {
+            try {
+              broadcastChannel.close();
+            } catch {}
+            broadcastChannel = null;
+          }
+          if (closePollTimer !== null) {
+            window.clearInterval(closePollTimer);
+            closePollTimer = null;
+          }
+          if (timeoutTimer !== null) {
+            window.clearTimeout(timeoutTimer);
+            timeoutTimer = null;
+          }
+          try {
+            localStorage.removeItem(OAUTH_POPUP_STORAGE_KEY);
+          } catch {}
+        };
+
+        const finish = (result: AuthResult) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(result);
+        };
+
+        const handlePayload = async (payload: OAuthCallbackPayload) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          try {
+            if (!popup.closed) popup.close();
+          } catch {}
+
+          const callbackResult = await completeOAuthCallbackPayload(payload);
+          if (callbackResult.status === 'success' && callbackResult.user) {
+            resolve({ success: true, user: callbackResult.user });
+          } else {
+            resolve({
+              success: false,
+              error: mapGoogleOAuthError(callbackResult.errorDescription || callbackResult.errorCode),
+              field: 'general'
+            });
+          }
+        };
+
+        const handleMessage = (event: MessageEvent) => {
+          if (!isAllowedMessageOrigin(event.origin, window.location.origin)) return;
+          const payload = parseOAuthCallbackPayload(event.data);
+          if (payload) {
+            void handlePayload(payload);
+          }
+        };
+
+        const handleStorage = (event: StorageEvent) => {
+          if (event.key !== OAUTH_POPUP_STORAGE_KEY || !event.newValue) return;
+          try {
+            const parsed = JSON.parse(event.newValue);
+            const payload = parseOAuthCallbackPayload(parsed);
+            if (payload) {
+              void handlePayload(payload);
+            }
+          } catch {
+            // ignore malformed JSON
+          }
+        };
+
+        window.addEventListener('message', handleMessage);
+        window.addEventListener('storage', handleStorage);
+
+        try {
+          if (typeof BroadcastChannel !== 'undefined') {
+            broadcastChannel = new BroadcastChannel(OAUTH_BROADCAST_CHANNEL);
+            broadcastChannel.onmessage = (event: MessageEvent) => {
+              const payload = parseOAuthCallbackPayload(event.data);
+              if (payload) {
+                void handlePayload(payload);
+              }
+            };
+          }
+        } catch {
+          // BroadcastChannel optional
+        }
+
+        closePollTimer = window.setInterval(() => {
+          if (popup.closed) {
+            // Give postMessage/BroadcastChannel a brief moment to arrive before treating as cancelled
+            window.setTimeout(() => {
+              finish({
+                success: false,
+                error: mapGoogleOAuthError('cancelled'),
+                field: 'general'
+              });
+            }, 600);
+          }
+        }, 500);
+
+        timeoutTimer = window.setTimeout(() => {
+          finish({
+            success: false,
+            error: 'Google sign-in timed out. Please try again.',
+            field: 'general'
+          });
+        }, 180000);
+      });
+    } catch (err: any) {
+      return {
+        success: false,
+        error: mapGoogleOAuthError(err),
+        field: 'general'
+      };
     }
   },
 

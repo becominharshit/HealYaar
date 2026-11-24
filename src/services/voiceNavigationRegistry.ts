@@ -131,7 +131,7 @@ export const HEALYAAR_SECTIONS: Record<NavTab, SectionRegistryItem> = {
     name: 'Login & Account',
     spokenName: 'Login and Account',
     shortOverview: 'Login lets you manage your secure account and preferences.',
-    detailedDescription: 'Login lets you authenticate securely with email, manage profile details, and sync your health records.',
+    detailedDescription: 'Login lets you authenticate securely with email or Google, manage profile details, and sync your health records.',
     actionQuestion: 'Would you like to open the Login page?',
     keywords: ['login', 'account', 'sign in', 'register', 'sign up', 'profile'],
     whereCanIKeywords: ['log in', 'sign in', 'create an account', 'access my profile']
@@ -140,21 +140,21 @@ export const HEALYAAR_SECTIONS: Record<NavTab, SectionRegistryItem> = {
     tab: 'privacy',
     name: 'Privacy Policy',
     spokenName: 'Privacy Policy',
-    shortOverview: 'Details how HealYaar protects, stores, and handles your personal health data.',
-    detailedDescription: 'The Privacy Policy explains how HealYaar handles your personal health information, data security, and your privacy rights.',
+    shortOverview: 'Privacy Policy explains how HealYaar protects your personal health information.',
+    detailedDescription: 'Privacy Policy details our encryption, data isolation, and user privacy commitments.',
     actionQuestion: 'Would you like to open the Privacy Policy?',
-    keywords: ['privacy', 'privacy policy', 'data protection', 'cookies'],
-    whereCanIKeywords: ['read the privacy policy', 'see how my data is used']
+    keywords: ['privacy', 'privacy policy', 'data protection'],
+    whereCanIKeywords: ['read privacy policy', 'view privacy']
   },
   terms: {
     tab: 'terms',
     name: 'Terms of Service',
     spokenName: 'Terms of Service',
-    shortOverview: 'Outlines the terms, medical disclaimers, and guidelines for using HealYaar.',
-    detailedDescription: 'The Terms of Service outline the medical disclaimers, acceptable use guidelines, and terms for using HealYaar.',
-    actionQuestion: 'Would you like to open the Terms of Service?',
-    keywords: ['terms', 'terms of service', 'legal', 'disclaimer'],
-    whereCanIKeywords: ['read the terms of service', 'see the medical disclaimer']
+    shortOverview: 'Terms of Service outlines guidelines for using HealYaar.',
+    detailedDescription: 'Terms of Service covers educational health disclaimers and platform usage terms.',
+    actionQuestion: 'Would you like to open Terms of Service?',
+    keywords: ['terms', 'terms of service', 'disclaimer'],
+    whereCanIKeywords: ['read terms', 'view terms of service']
   }
 };
 

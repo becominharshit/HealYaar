@@ -120,6 +120,7 @@ interface AppContextType {
   authCallbackError: { code: string; description: string } | null;
   clearAuthCallbackError: () => void;
   login: (credentials: LoginCredentials) => Promise<AuthResult>;
+  loginWithGoogle: () => Promise<AuthResult>;
   signup: (credentials: SignUpCredentials) => Promise<AuthResult>;
   logout: () => void;
   requestPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
@@ -244,7 +245,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           clearStoredAuthCallbackError();
           setAuthCallbackError(null);
           setCurrentUser(callbackResult.user);
-          showToast('Email verified successfully! Welcome to HealYaar.');
+          showToast(`Welcome to HealYaar, ${callbackResult.user.name}!`);
           setTabState('home');
           setIsAuthLoading(false);
           return true;
@@ -625,6 +626,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Post-login sync notice:', err);
       }
     }
+      return result;
+  };
+
+  const loginWithGoogle = async (): Promise<AuthResult> => {
+    const result = await authService.signInWithGoogle();
+    if (result.success && result.user) {
+      clearStoredAuthCallbackError();
+      setAuthCallbackError(null);
+      setCurrentUser(result.user);
+      showToast(`Welcome to HealYaar, ${result.user.name}!`);
+
+      try {
+        const [cloudReminders, cloudCycles, cloudPrefs] = await Promise.all([
+          reminderService.getReminders(result.user.id),
+          periodService.getCycles(result.user.id),
+          userPreferencesService.getPreferences(result.user.id)
+        ]);
+        setReminders(cloudReminders);
+        setPeriodLogs(cloudCycles);
+        if (cloudPrefs) {
+          if (cloudPrefs.theme) setTheme(cloudPrefs.theme);
+          if (cloudPrefs.textSize) setTextSize(cloudPrefs.textSize);
+          if (cloudPrefs.language) setLanguage(cloudPrefs.language);
+          if (cloudPrefs.highContrast !== undefined) setHighContrast(cloudPrefs.highContrast);
+        }
+      } catch (err) {
+        console.warn('Post-Google-login sync notice:', err);
+      }
+    }
     return result;
   };
 
@@ -690,6 +720,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         authCallbackError,
         clearAuthCallbackError,
         login,
+        loginWithGoogle,
         signup,
         logout,
         requestPasswordReset,

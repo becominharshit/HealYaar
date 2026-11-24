@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { authService, AuthUser } from './authService';
+import { OAuthCallbackPayload } from './oauthPopupHelpers';
 
 export interface AuthCallbackParams {
   errorCode: string | null;
@@ -30,7 +31,18 @@ export function getAuthRedirectUrl(): string {
     // Return window origin with trailing slash for consistent matching
     return `${window.location.origin}/`;
   }
-  return 'http://localhost:5173/';
+  return 'http://localhost:3000/';
+}
+
+/**
+ * Returns the lightweight static OAuth callback URL for popup & redirect flows.
+ * Works reliably inside iframe preview environments as well as standalone deployments.
+ */
+export function getOAuthCallbackUrl(): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}/auth-callback.html`;
+  }
+  return 'http://localhost:3000/auth-callback.html';
 }
 
 /**
@@ -103,8 +115,11 @@ export function cleanAuthUrlParams(): void {
     url.search = '';
     url.hash = '';
 
-    // If the path was a dedicated callback path like /auth/callback, normalize to root
-    const cleanPath = url.pathname.endsWith('/auth/callback') ? '/' : url.pathname;
+    // If the path was a dedicated callback path like /auth/callback or /auth-callback.html, normalize to root
+    const cleanPath =
+      url.pathname.endsWith('/auth/callback') || url.pathname.endsWith('/auth-callback.html')
+        ? '/'
+        : url.pathname;
     window.history.replaceState({}, document.title, cleanPath);
   } catch (err) {
     console.warn('Could not clean auth URL params:', err);
@@ -286,4 +301,93 @@ export async function handleIncomingAuthCallback(): Promise<AuthCallbackResult> 
 
   cleanAuthUrlParams();
   return { status: 'none' };
+}
+
+/**
+ * Completes an OAuth sign-in callback received via same-origin popup postMessage / BroadcastChannel.
+ */
+export async function completeOAuthCallbackPayload(
+  payload: OAuthCallbackPayload
+): Promise<AuthCallbackResult> {
+  if (payload.errorCode || payload.errorDescription) {
+    let description =
+      payload.errorDescription || 'Google sign-in was cancelled or could not be completed.';
+    try {
+      description = decodeURIComponent(description.replace(/\+/g, ' '));
+    } catch {}
+    return {
+      status: 'error',
+      errorCode: payload.errorCode || 'oauth_error',
+      errorDescription: description
+    };
+  }
+
+  if (!isSupabaseConfigured()) {
+    return {
+      status: 'error',
+      errorCode: 'unconfigured',
+      errorDescription: 'Supabase authentication service is not configured in this environment.'
+    };
+  }
+
+  if (payload.code) {
+    try {
+      const { data, error } = await supabase.auth.exchangeCodeForSession(payload.code);
+      if (error) {
+        return {
+          status: 'error',
+          errorCode: (error as any).code || 'pkce_exchange_failed',
+          errorDescription: error.message || 'Unable to complete Google sign-in.'
+        };
+      }
+      if (data.session) {
+        if (data.session.user) {
+          await authService.ensureUserProfile(data.session.user);
+        }
+        const user = await authService.getCurrentUser();
+        return { status: 'success', session: data.session, user };
+      }
+    } catch (e: any) {
+      return {
+        status: 'error',
+        errorCode: 'pkce_exception',
+        errorDescription: e?.message || 'Error completing Google sign-in.'
+      };
+    }
+  }
+
+  if (payload.accessToken && payload.refreshToken) {
+    try {
+      const { data, error } = await supabase.auth.setSession({
+        access_token: payload.accessToken,
+        refresh_token: payload.refreshToken
+      });
+      if (error) {
+        return {
+          status: 'error',
+          errorCode: (error as any).code || 'session_set_failed',
+          errorDescription: error.message || 'Unable to establish session.'
+        };
+      }
+      if (data.session) {
+        if (data.session.user) {
+          await authService.ensureUserProfile(data.session.user);
+        }
+        const user = await authService.getCurrentUser();
+        return { status: 'success', session: data.session, user };
+      }
+    } catch (e: any) {
+      return {
+        status: 'error',
+        errorCode: 'session_exception',
+        errorDescription: e?.message || 'Error establishing Google session.'
+      };
+    }
+  }
+
+  return {
+    status: 'error',
+    errorCode: 'missing_oauth_credentials',
+    errorDescription: 'No authorization code or session token was returned by Google.'
+  };
 }

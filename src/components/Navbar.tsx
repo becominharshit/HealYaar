@@ -4,6 +4,7 @@ import { NavTab, SupportedLanguage } from '../types';
 import { regionalOptions } from '../i18n/translations';
 import { VOICE_LONG_PRESS_MS } from '../context/VoiceAssistantContext';
 import { Tooltip } from './ui/Tooltip';
+import { isSafeAvatarUrl } from '../services/oauthPopupHelpers';
 import {
   Heart,
   Home,
@@ -235,9 +236,18 @@ export const Navbar: React.FC = () => {
           {isAuthenticated && currentUser && (
             <div className="hidden lg:block p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-2">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-teal-600 to-emerald-500 text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-2xs">
-                  {currentUser.name.charAt(0).toUpperCase()}
-                </div>
+                {isSafeAvatarUrl(currentUser.avatarUrl) ? (
+                  <img
+                    src={currentUser.avatarUrl!}
+                    alt={currentUser.name}
+                    referrerPolicy="no-referrer"
+                    className="w-8 h-8 rounded-full object-cover flex-shrink-0 border border-teal-200 dark:border-teal-800 shadow-2xs"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-teal-600 to-emerald-500 text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-2xs">
+                    {currentUser.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
                 <div className="min-w-0 flex-1">
                   <p className="font-extrabold text-xs text-slate-900 dark:text-white truncate">
                     {currentUser.name}
@@ -454,9 +464,18 @@ export const Navbar: React.FC = () => {
                   aria-label="User profile menu"
                   aria-expanded={userDropdownOpen}
                 >
-                  <div className="w-5 h-5 rounded-full bg-teal-600 text-white flex items-center justify-center text-[10px] font-black flex-shrink-0">
-                    {currentUser.name.charAt(0).toUpperCase()}
-                  </div>
+                  {isSafeAvatarUrl(currentUser.avatarUrl) ? (
+                    <img
+                      src={currentUser.avatarUrl!}
+                      alt={currentUser.name}
+                      referrerPolicy="no-referrer"
+                      className="w-5 h-5 rounded-full object-cover flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-teal-600 text-white flex items-center justify-center text-[10px] font-black flex-shrink-0">
+                      {currentUser.name.charAt(0).toUpperCase()}
+                    </div>
+                  )}
                   <span className="hidden sm:inline max-w-[100px] truncate">{currentUser.name}</span>
                 </button>
 

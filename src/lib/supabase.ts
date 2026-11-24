@@ -35,6 +35,7 @@ export const supabase: SupabaseClient = createClient(fallbackUrl, fallbackKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    flowType: 'pkce',
     storageKey: 'healyaar_sb_auth_token'
   }
 });
