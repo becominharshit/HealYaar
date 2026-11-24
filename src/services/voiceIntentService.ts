@@ -56,7 +56,9 @@ export const TAB_LABELS: Record<NavTab, string> = {
   mental: 'Mental Wellbeing',
   period: 'Period Tracker',
   reminders: 'Reminders',
-  login: 'Login & Authentication'
+  login: 'Login & Authentication',
+  privacy: 'Privacy Policy',
+  terms: 'Terms of Service'
 };
 
 /**

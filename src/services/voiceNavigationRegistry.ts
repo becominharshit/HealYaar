@@ -135,6 +135,26 @@ export const HEALYAAR_SECTIONS: Record<NavTab, SectionRegistryItem> = {
     actionQuestion: 'Would you like to open the Login page?',
     keywords: ['login', 'account', 'sign in', 'register', 'sign up', 'profile'],
     whereCanIKeywords: ['log in', 'sign in', 'create an account', 'access my profile']
+  },
+  privacy: {
+    tab: 'privacy',
+    name: 'Privacy Policy',
+    spokenName: 'Privacy Policy',
+    shortOverview: 'Details how HealYaar protects, stores, and handles your personal health data.',
+    detailedDescription: 'The Privacy Policy explains how HealYaar handles your personal health information, data security, and your privacy rights.',
+    actionQuestion: 'Would you like to open the Privacy Policy?',
+    keywords: ['privacy', 'privacy policy', 'data protection', 'cookies'],
+    whereCanIKeywords: ['read the privacy policy', 'see how my data is used']
+  },
+  terms: {
+    tab: 'terms',
+    name: 'Terms of Service',
+    spokenName: 'Terms of Service',
+    shortOverview: 'Outlines the terms, medical disclaimers, and guidelines for using HealYaar.',
+    detailedDescription: 'The Terms of Service outline the medical disclaimers, acceptable use guidelines, and terms for using HealYaar.',
+    actionQuestion: 'Would you like to open the Terms of Service?',
+    keywords: ['terms', 'terms of service', 'legal', 'disclaimer'],
+    whereCanIKeywords: ['read the terms of service', 'see the medical disclaimer']
   }
 };
 

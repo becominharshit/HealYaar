@@ -41,7 +41,9 @@ const TAB_THEME_MAP: Record<NavTab, FloatingTheme> = {
   mental: 'mental-wellbeing',
   period: 'period',
   reminders: 'reminders',
-  login: 'login'
+  login: 'login',
+  privacy: 'home',
+  terms: 'home'
 };
 
 const MainLayout: React.FC = () => {
