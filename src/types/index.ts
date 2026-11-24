@@ -14,7 +14,9 @@ export type NavTab =
   | 'mental'
   | 'period'
   | 'reminders'
-  | 'login';
+  | 'login'
+  | 'privacy'
+  | 'terms';
 
 export type { AuthUser, LoginCredentials, SignUpCredentials, AuthResult } from '../services/authService';
 export * from './rag';
