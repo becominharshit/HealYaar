@@ -15,7 +15,11 @@ import {
   PharmacyListing
 } from '../types';
 import { prescriptionService } from '../services/prescriptionService';
+import { authService } from '../services/authService';
 import { indexPrescription, deleteChunksBySource } from '../services/rag/ragVaultService';
+import { PortalModal } from '../components/ui/PortalModal';
+import { formatDisplayDate } from '../utils/healthFormatters';
+import { registerBlobUrl, revokeRegisteredBlobUrl } from '../utils/mediaSessionCleanup';
 import {
   getBrowserCurrentPosition,
   reverseGeocodeCoordinates,
@@ -79,11 +83,18 @@ export const PrescriptionsMedicinesView: React.FC = () => {
   const [showOriginalModal, setShowOriginalModal] = useState<boolean>(false);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [prescriptionHistory, setPrescriptionHistory] = useState<SyntheticPrescription[]>([]);
+  const [rxUploadConsent, setRxUploadConsent] = useState<boolean>(false);
+  const [rxConsentError, setRxConsentError] = useState<string | null>(null);
 
   // Restore user's saved prescription and history from cloud/local if available
   useEffect(() => {
     let isMounted = true;
     if (currentUser?.id) {
+      try {
+        setRxUploadConsent(localStorage.getItem(`healyaar_user_${currentUser.id}_upload_consent_rx`) === 'true');
+      } catch {
+        setRxUploadConsent(false);
+      }
       prescriptionService.getPrescriptions(currentUser.id).then((savedList) => {
         if (isMounted && savedList) {
           setPrescriptionHistory(savedList);
@@ -99,11 +110,30 @@ export const PrescriptionsMedicinesView: React.FC = () => {
       setEditableMedicines([]);
       setUploadedImageBlobUrl(null);
       setPrescriptionHistory([]);
+      setRxUploadConsent(false);
     }
     return () => {
       isMounted = false;
     };
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    const handleReset = () => {
+      if (uploadedImageBlobUrl) {
+        revokeRegisteredBlobUrl(uploadedImageBlobUrl);
+      }
+      setUploadedImageBlobUrl(null);
+      setSelectedRx(null);
+      setEditableMedicines([]);
+      setPrescriptionHistory([]);
+      setShowOriginalModal(false);
+      setShowReminderConfirmModal(false);
+      setShowDuplicateModal(false);
+      setSelectedPharmacyForCall(null);
+    };
+    window.addEventListener('healyaar_session_reset', handleReset);
+    return () => window.removeEventListener('healyaar_session_reset', handleReset);
+  }, [uploadedImageBlobUrl]);
 
   const [catalogSearch, setCatalogSearch] = useState<string>('');
   const [isDemoOrderCompleted, setIsDemoOrderCompleted] = useState<boolean>(false);
@@ -168,23 +198,76 @@ export const PrescriptionsMedicinesView: React.FC = () => {
   useEffect(() => {
     return () => {
       if (uploadedImageBlobUrl) {
-        URL.revokeObjectURL(uploadedImageBlobUrl);
+        revokeRegisteredBlobUrl(uploadedImageBlobUrl);
       }
     };
   }, [uploadedImageBlobUrl]);
+
+  /**
+   * Load Demo Prescription for instant live walkthroughs
+   */
+  const handleLoadDemoPrescription = () => {
+    setRxConsentError(null);
+    const demoBase = syntheticPrescriptions[0];
+    const demoRx: SyntheticPrescription = {
+      ...demoBase,
+      id: `rx-demo-${Date.now()}`,
+      patientName: 'Demo Patient Slip',
+      date: new Date().toISOString().split('T')[0]
+    };
+
+    setSelectedRx(demoRx);
+    setEditableMedicines(demoRx.medicines);
+    setRemindersCreatedSuccess(false);
+    setPrescriptionHistory((prev) => [demoRx, ...prev.filter((r) => r.id !== demoRx.id)]);
+    void prescriptionService.savePrescription(currentUser?.id || '', demoRx);
+    if (currentUser?.id) {
+      indexPrescription(currentUser.id, {
+        id: demoRx.id,
+        doctorName: demoRx.doctorName,
+        clinicName: demoRx.clinicName,
+        date: demoRx.date,
+        diagnosis: demoRx.diagnosisSummary,
+        medications: demoRx.medicines?.map(m => ({
+          name: m.name,
+          dosage: m.dosage,
+          frequency: m.frequency,
+          timing: m.timing,
+          duration: m.durationDays ? `${m.durationDays} days` : 'As directed',
+          instructions: m.instructions
+        })),
+        advice: demoRx.generalAdvice
+      }).catch(e => console.warn('RAG demo prescription indexing failed:', e));
+    }
+    showToast('Demo prescription loaded and indexed into your Health Vault.');
+  };
 
   /**
    * Handle Prescription File Upload or Camera Capture with on-device OCR
    */
   const handleSimulatedRxUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
+    if (!rxUploadConsent) {
+      setRxConsentError('Please confirm your on-device prescription processing consent before uploading a file.');
+      e.target.value = '';
+      return;
+    }
+    setRxConsentError(null);
+    if (currentUser?.id) {
+      try {
+        localStorage.setItem(`healyaar_user_${currentUser.id}_upload_consent_rx`, 'true');
+      } catch {
+        // ignore
+      }
+      authService.recordConsent(currentUser.id, 'prescription_upload', '1.0').catch(() => {});
+    }
     const file = e.target.files[0];
 
     // Clean up previous blob URL if any
     if (uploadedImageBlobUrl) {
-      URL.revokeObjectURL(uploadedImageBlobUrl);
+      revokeRegisteredBlobUrl(uploadedImageBlobUrl);
     }
-    const objectUrl = URL.createObjectURL(file);
+    const objectUrl = registerBlobUrl(URL.createObjectURL(file));
     setUploadedImageBlobUrl(objectUrl);
     setIsAnalyzing(true);
 
@@ -266,7 +349,7 @@ export const PrescriptionsMedicinesView: React.FC = () => {
    */
   const handleClearPrescription = () => {
     if (uploadedImageBlobUrl) {
-      URL.revokeObjectURL(uploadedImageBlobUrl);
+      revokeRegisteredBlobUrl(uploadedImageBlobUrl);
     }
     setUploadedImageBlobUrl(null);
     setSelectedRx(null);
@@ -642,29 +725,67 @@ export const PrescriptionsMedicinesView: React.FC = () => {
                     <p className="text-xs text-slate-500">Extracting medicine names, dosages, timings, and instructions</p>
                   </div>
                 ) : (
-                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-                    <label className="interactive-button cursor-pointer inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm shadow-md transition-all active:scale-95 w-full sm:w-auto">
-                      <Upload className="w-4 h-4" />
-                      <span>Upload Doctor Prescription</span>
-                      <input
-                        type="file"
-                        accept="image/*,.pdf"
-                        className="hidden"
-                        onChange={handleSimulatedRxUpload}
-                      />
-                    </label>
+                  <div className="space-y-4">
+                    {/* First-Time Prescription Upload Consent */}
+                    <div className="max-w-lg mx-auto text-left space-y-1.5">
+                      <label
+                        htmlFor="rx-upload-consent"
+                        className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 cursor-pointer text-xs text-slate-700 dark:text-slate-300"
+                      >
+                        <input
+                          id="rx-upload-consent"
+                          type="checkbox"
+                          checked={rxUploadConsent}
+                          onChange={(e) => {
+                            setRxUploadConsent(e.target.checked);
+                            if (e.target.checked) setRxConsentError(null);
+                          }}
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500 flex-shrink-0"
+                        />
+                        <span>
+                          I consent to HealYaar scanning my prescription on-device to extract dosages for personal reminder tracking (always verify against your doctor&apos;s slip).
+                        </span>
+                      </label>
+                      {rxConsentError && (
+                        <p role="alert" className="text-xs font-semibold text-rose-600">
+                          {rxConsentError}
+                        </p>
+                      )}
+                    </div>
 
-                    <label className="interactive-button cursor-pointer inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-white hover:bg-slate-100 text-slate-800 font-bold text-sm border border-slate-300 shadow-xs transition-all active:scale-95 w-full sm:w-auto">
-                      <Camera className="w-4 h-4 text-teal-600" />
-                      <span>Capture with Camera</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={handleSimulatedRxUpload}
-                      />
-                    </label>
+                    <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3 pt-1">
+                      <label className="interactive-button cursor-pointer inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm shadow-md transition-all active:scale-95 w-full sm:w-auto">
+                        <Upload className="w-4 h-4" aria-hidden="true" />
+                        <span>Upload Doctor Prescription</span>
+                        <input
+                          type="file"
+                          accept="image/*,.pdf"
+                          className="hidden"
+                          onChange={handleSimulatedRxUpload}
+                        />
+                      </label>
+
+                      <label className="interactive-button cursor-pointer inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-white hover:bg-slate-100 text-slate-800 font-bold text-sm border border-slate-300 shadow-xs transition-all active:scale-95 w-full sm:w-auto">
+                        <Camera className="w-4 h-4 text-teal-600" aria-hidden="true" />
+                        <span>Capture with Camera</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="hidden"
+                          onChange={handleSimulatedRxUpload}
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={handleLoadDemoPrescription}
+                        className="interactive-button inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold text-sm border border-rose-200 shadow-xs transition-all active:scale-95 w-full sm:w-auto"
+                      >
+                        <FileText className="w-4 h-4 text-rose-600" aria-hidden="true" />
+                        <span>Load Demo Prescription</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </section>
@@ -724,7 +845,7 @@ export const PrescriptionsMedicinesView: React.FC = () => {
                     {selectedRx.doctorName}
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-600">
-                    {selectedRx.doctorQualification} • {selectedRx.clinicName} • Date: {selectedRx.date}
+                    {selectedRx.doctorQualification} • {selectedRx.clinicName} • Date: {formatDisplayDate(selectedRx.date)}
                   </p>
                 </div>
 
@@ -1153,7 +1274,7 @@ export const PrescriptionsMedicinesView: React.FC = () => {
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-bold text-teal-800 dark:text-teal-300">
-                            {rx.date || 'Saved slip'}
+                            {rx.date ? formatDisplayDate(rx.date) : 'Saved slip'}
                           </span>
                           <button
                             type="button"
@@ -1184,27 +1305,29 @@ export const PrescriptionsMedicinesView: React.FC = () => {
         </div>
       )}
 
-      {/* ORIGINAL PRESCRIPTION DOCUMENT MODAL */}
-      {showOriginalModal && uploadedImageBlobUrl && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
-        >
+      {/* ORIGINAL PRESCRIPTION DOCUMENT MODAL (PORTALIZED) */}
+      <PortalModal
+        isOpen={Boolean(showOriginalModal && uploadedImageBlobUrl)}
+        onClose={() => setShowOriginalModal(false)}
+        ariaLabel="Original Prescription Document"
+        backdropClassName="bg-black/80"
+      >
+        {uploadedImageBlobUrl && (
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div className="flex items-center gap-2">
-                <Eye className="w-5 h-5 text-teal-600" />
+                <Eye className="w-5 h-5 text-teal-600" aria-hidden="true" />
                 <h3 className="text-xl font-black text-slate-900">
                   Original Prescription Document
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setShowOriginalModal(false)}
                 className="p-1.5 text-slate-400 hover:text-slate-800 font-bold rounded-lg"
                 aria-label="Close modal"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
 
@@ -1217,8 +1340,9 @@ export const PrescriptionsMedicinesView: React.FC = () => {
             </div>
 
             <div className="p-3 bg-teal-50 border border-teal-200 rounded-xl text-xs text-teal-950 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <span>Compare the AI-extracted medicine cards against your doctor's handwritten or printed note.</span>
+              <span>Compare the AI-extracted medicine cards against your doctor&apos;s handwritten or printed note.</span>
               <button
+                type="button"
                 onClick={() => setShowOriginalModal(false)}
                 className="interactive-button px-4 py-2 bg-teal-600 text-white font-bold rounded-xl text-xs whitespace-nowrap hover:bg-teal-700"
               >
@@ -1226,185 +1350,190 @@ export const PrescriptionsMedicinesView: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </PortalModal>
 
-      {/* MODAL: CONFIRM PRESCRIPTION REMINDERS */}
-      {showReminderConfirmModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
-        >
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5">
-            <div className="flex items-start justify-between">
-              <div>
-                <span className="px-3 py-1 bg-teal-100 text-teal-800 rounded-full text-xs font-bold uppercase tracking-wider">
-                  One-Time Confirmation
-                </span>
-                <h3 className="text-2xl font-black text-slate-900 mt-2">
-                  Add Prescription to Reminders
-                </h3>
-                <p className="text-xs sm:text-sm text-slate-600">
-                  We'll create scheduled reminders for all {editableMedicines.length} prescription medicines.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowReminderConfirmModal(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-800 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Medicines List to Add */}
-            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-              {editableMedicines.map((med) => (
-                <div
-                  key={med.id}
-                  className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex items-center justify-between"
-                >
-                  <div>
-                    <h5 className="font-bold text-slate-900">{med.name} ({med.dosage})</h5>
-                    <p className="text-slate-500">{med.frequency} • {med.timing}</p>
-                  </div>
-                  <span className="px-2 py-1 bg-teal-50 text-teal-800 font-bold rounded-lg">
-                    {med.durationDays} days
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* Preferred Reminder Slot Times */}
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-              <span className="text-xs font-bold uppercase text-slate-500 block">
-                Adjust Daily Reminder Times (If Desired):
+      {/* MODAL: CONFIRM PRESCRIPTION REMINDERS (PORTALIZED) */}
+      <PortalModal
+        isOpen={showReminderConfirmModal}
+        onClose={() => setShowReminderConfirmModal(false)}
+        ariaLabel="Add Prescription to Reminders"
+        backdropClassName="bg-black/70"
+      >
+        <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <span className="px-3 py-1 bg-teal-100 text-teal-800 rounded-full text-xs font-bold uppercase tracking-wider">
+                One-Time Confirmation
               </span>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <label className="text-slate-500 block">Morning Slot:</label>
-                  <input
-                    type="time"
-                    value={reminderTimes.morning}
-                    onChange={(e) => setReminderTimes((prev) => ({ ...prev, morning: e.target.value }))}
-                    className="p-1.5 rounded-lg border border-slate-200 w-full font-bold text-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-500 block">Night Slot:</label>
-                  <input
-                    type="time"
-                    value={reminderTimes.bedtime}
-                    onChange={(e) => setReminderTimes((prev) => ({ ...prev, bedtime: e.target.value }))}
-                    className="p-1.5 rounded-lg border border-slate-200 w-full font-bold text-slate-800"
-                  />
-                </div>
-              </div>
+              <h3 className="text-2xl font-black text-slate-900 mt-2">
+                Add Prescription to Reminders
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-600">
+                We&apos;ll create scheduled reminders for all {editableMedicines.length} prescription medicines.
+              </p>
             </div>
-
-            {/* Actions */}
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowReminderConfirmModal(false)}
-                className="interactive-button px-4 py-2.5 text-slate-600 font-bold text-sm hover:bg-slate-100 rounded-xl"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={() => createRemindersFromPrescription(editableMedicines)}
-                className="interactive-button px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow transition-transform active:scale-95"
-              >
-                Confirm & Add All
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowReminderConfirmModal(false)}
+              aria-label="Close reminders confirmation modal"
+              className="p-1.5 text-slate-400 hover:text-slate-800 font-bold"
+            >
+              <X className="w-5 h-5" aria-hidden="true" />
+            </button>
           </div>
-        </div>
-      )}
 
-      {/* MODAL: DUPLICATE REMINDERS RESOLUTION */}
-      {showDuplicateModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
-        >
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5">
-            <div className="flex items-start justify-between">
-              <div>
-                <span className="px-3 py-1 bg-amber-100 text-amber-900 rounded-full text-xs font-bold uppercase tracking-wider">
-                  Duplicate Reminder Notice
+          {/* Medicines List to Add */}
+          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+            {editableMedicines.map((med) => (
+              <div
+                key={med.id}
+                className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex items-center justify-between"
+              >
+                <div>
+                  <h5 className="font-bold text-slate-900">{med.name} ({med.dosage})</h5>
+                  <p className="text-slate-500">{med.frequency} • {med.timing}</p>
+                </div>
+                <span className="px-2 py-1 bg-teal-50 text-teal-800 font-bold rounded-lg">
+                  {med.durationDays} days
                 </span>
-                <h3 className="text-xl font-black text-slate-900 mt-2">
-                  Some Medicines Are Already in Your Reminders
-                </h3>
-                <p className="text-xs text-slate-600">
-                  We noticed {duplicateMedsList.length} of these medicines already exist in your active reminders list.
-                </p>
               </div>
-              <button
-                onClick={() => setShowDuplicateModal(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-800 font-bold"
-              >
-                ✕
-              </button>
-            </div>
+            ))}
+          </div>
 
-            {/* Existing duplicates list */}
-            <div className="space-y-2">
-              {duplicateMedsList.map((m) => (
-                <div
-                  key={m.id}
-                  className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs flex items-center justify-between"
-                >
-                  <span className="font-bold text-amber-950">{m.name} ({m.dosage})</span>
-                  <span className="text-[11px] text-amber-800 font-semibold">Already in Reminders</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Options */}
-            <div className="space-y-2 pt-2">
-              <button
-                type="button"
-                onClick={() => createRemindersFromPrescription(newMedsList)}
-                disabled={newMedsList.length === 0}
-                className="interactive-button w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow disabled:opacity-50 text-left px-4 flex items-center justify-between"
-              >
-                <span>Add only missing medicines ({newMedsList.length} new)</span>
-                <ChevronRight className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => createRemindersFromPrescription(editableMedicines)}
-                className="interactive-button w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm rounded-xl text-left px-4 flex items-center justify-between"
-              >
-                <span>Add all medicines anyway (Allow duplicates)</span>
-                <ChevronRight className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowDuplicateModal(false)}
-                className="interactive-button w-full py-2.5 text-slate-500 font-bold text-xs hover:text-slate-800 text-center"
-              >
-                Keep Existing Reminders (Cancel)
-              </button>
+          {/* Preferred Reminder Slot Times */}
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+            <span className="text-xs font-bold uppercase text-slate-500 block">
+              Adjust Daily Reminder Times (If Desired):
+            </span>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>
+                <label htmlFor="rx-morning-slot" className="text-slate-500 block">Morning Slot:</label>
+                <input
+                  id="rx-morning-slot"
+                  type="time"
+                  value={reminderTimes.morning}
+                  onChange={(e) => setReminderTimes((prev) => ({ ...prev, morning: e.target.value }))}
+                  className="p-1.5 rounded-lg border border-slate-200 w-full font-bold text-slate-800"
+                />
+              </div>
+              <div>
+                <label htmlFor="rx-bedtime-slot" className="text-slate-500 block">Night Slot:</label>
+                <input
+                  id="rx-bedtime-slot"
+                  type="time"
+                  value={reminderTimes.bedtime}
+                  onChange={(e) => setReminderTimes((prev) => ({ ...prev, bedtime: e.target.value }))}
+                  className="p-1.5 rounded-lg border border-slate-200 w-full font-bold text-slate-800"
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* MODAL: CALL PHARMACY CONFIRMATION & SCRIPT */}
-      {selectedPharmacyForCall && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
-        >
+          {/* Actions */}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowReminderConfirmModal(false)}
+              className="interactive-button px-4 py-2.5 text-slate-600 font-bold text-sm hover:bg-slate-100 rounded-xl"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="button"
+              onClick={() => createRemindersFromPrescription(editableMedicines)}
+              className="interactive-button px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow transition-transform active:scale-95"
+            >
+              Confirm & Add All
+            </button>
+          </div>
+        </div>
+      </PortalModal>
+
+      {/* MODAL: DUPLICATE REMINDERS RESOLUTION (PORTALIZED) */}
+      <PortalModal
+        isOpen={showDuplicateModal}
+        onClose={() => setShowDuplicateModal(false)}
+        ariaLabel="Duplicate Reminder Notice"
+        backdropClassName="bg-black/70"
+      >
+        <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <span className="px-3 py-1 bg-amber-100 text-amber-900 rounded-full text-xs font-bold uppercase tracking-wider">
+                Duplicate Reminder Notice
+              </span>
+              <h3 className="text-xl font-black text-slate-900 mt-2">
+                Some Medicines Are Already in Your Reminders
+              </h3>
+              <p className="text-xs text-slate-600">
+                We noticed {duplicateMedsList.length} of these medicines already exist in your active reminders list.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDuplicateModal(false)}
+              aria-label="Close duplicate reminder modal"
+              className="p-1.5 text-slate-400 hover:text-slate-800 font-bold"
+            >
+              <X className="w-5 h-5" aria-hidden="true" />
+            </button>
+          </div>
+
+          {/* Existing duplicates list */}
+          <div className="space-y-2">
+            {duplicateMedsList.map((m) => (
+              <div
+                key={m.id}
+                className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs flex items-center justify-between"
+              >
+                <span className="font-bold text-amber-950">{m.name} ({m.dosage})</span>
+                <span className="text-[11px] text-amber-800 font-semibold">Already in Reminders</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Options */}
+          <div className="space-y-2 pt-2">
+            <button
+              type="button"
+              onClick={() => createRemindersFromPrescription(newMedsList)}
+              disabled={newMedsList.length === 0}
+              className="interactive-button w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow disabled:opacity-50 text-left px-4 flex items-center justify-between"
+            >
+              <span>Add only missing medicines ({newMedsList.length} new)</span>
+              <ChevronRight className="w-4 h-4" aria-hidden="true" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => createRemindersFromPrescription(editableMedicines)}
+              className="interactive-button w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm rounded-xl text-left px-4 flex items-center justify-between"
+            >
+              <span>Add all medicines anyway (Allow duplicates)</span>
+              <ChevronRight className="w-4 h-4" aria-hidden="true" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowDuplicateModal(false)}
+              className="interactive-button w-full py-2.5 text-slate-500 font-bold text-xs hover:text-slate-800 text-center"
+            >
+              Keep Existing Reminders (Cancel)
+            </button>
+          </div>
+        </div>
+      </PortalModal>
+
+      {/* MODAL: CALL PHARMACY CONFIRMATION & SCRIPT (PORTALIZED) */}
+      <PortalModal
+        isOpen={Boolean(selectedPharmacyForCall)}
+        onClose={() => setSelectedPharmacyForCall(null)}
+        ariaLabel="Pharmacy Call Confirmation"
+        backdropClassName="bg-black/70"
+      >
+        {selectedPharmacyForCall && (
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5">
             <div className="flex items-start justify-between">
               <div>
@@ -1419,10 +1548,12 @@ export const PrescriptionsMedicinesView: React.FC = () => {
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setSelectedPharmacyForCall(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-800 font-bold text-lg"
+                aria-label="Close pharmacy call modal"
+                className="p-1.5 text-slate-400 hover:text-slate-800 font-bold"
               >
-                ✕
+                <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
 
@@ -1445,7 +1576,7 @@ export const PrescriptionsMedicinesView: React.FC = () => {
             <div className="p-4 bg-teal-50 rounded-2xl border border-teal-200 space-y-2 text-xs">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-teal-950 uppercase flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-teal-600" />
+                  <FileText className="w-3.5 h-3.5 text-teal-600" aria-hidden="true" />
                   <span>Suggested Call Script (To read to the pharmacist):</span>
                 </span>
                 <button
@@ -1453,17 +1584,17 @@ export const PrescriptionsMedicinesView: React.FC = () => {
                   onClick={handleCopyScript}
                   className="interactive-button px-2 py-1 bg-white border border-teal-300 text-teal-800 font-bold rounded-lg text-[11px] flex items-center gap-1 hover:bg-teal-100 transition-colors shadow-2xs"
                 >
-                  {isScriptCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                  {isScriptCopied ? <Check className="w-3 h-3 text-emerald-600" aria-hidden="true" /> : <Copy className="w-3 h-3" aria-hidden="true" />}
                   <span>{isScriptCopied ? 'Copied' : 'Copy'}</span>
                 </button>
               </div>
               <p className="text-teal-900 leading-relaxed italic bg-white/70 p-3 rounded-xl border border-teal-100">
-                "{callScriptText}"
+                &quot;{callScriptText}&quot;
               </p>
             </div>
 
             <p className="text-[11px] text-slate-400">
-              * Note: Clicking "Call Store" triggers your phone's native calling interface. This does NOT place an automated order or charge payment.
+              * Note: Clicking &quot;Call Store&quot; triggers your phone&apos;s native calling interface. This does NOT place an automated order or charge payment.
             </p>
 
             {/* Call Action Buttons */}
@@ -1485,13 +1616,13 @@ export const PrescriptionsMedicinesView: React.FC = () => {
                 }}
                 className="interactive-button px-6 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow flex items-center gap-2 transition-transform active:scale-95"
               >
-                <PhoneCall className="w-4 h-4" />
+                <PhoneCall className="w-4 h-4" aria-hidden="true" />
                 <span>Call Store ({selectedPharmacyForCall.phone})</span>
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </PortalModal>
 
       {/* SUB-VIEW 2: MEDICINE CATALOG */}
       {activeTab === 'catalog' && (

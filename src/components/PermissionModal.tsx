@@ -1,34 +1,33 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
 import { ShieldCheck, Mic, MapPin, Bell, FileText, X } from 'lucide-react';
+import { PortalModal } from './ui/PortalModal';
 
 export const PermissionModal: React.FC = () => {
   const { permissionModal, closePermissionModal, t, highContrast } = useApp();
 
-  if (!permissionModal.isOpen) return null;
-
   const getIcon = () => {
     switch (permissionModal.type) {
       case 'mic':
-        return <Mic className="w-8 h-8 text-teal-600" />;
+        return <Mic className="w-8 h-8 text-teal-600" aria-hidden="true" />;
       case 'location':
-        return <MapPin className="w-8 h-8 text-blue-600" />;
+        return <MapPin className="w-8 h-8 text-blue-600" aria-hidden="true" />;
       case 'notifications':
-        return <Bell className="w-8 h-8 text-amber-600" />;
+        return <Bell className="w-8 h-8 text-amber-600" aria-hidden="true" />;
       case 'report_ocr':
       case 'rx_ocr':
-        return <FileText className="w-8 h-8 text-purple-600" />;
+        return <FileText className="w-8 h-8 text-purple-600" aria-hidden="true" />;
       default:
-        return <ShieldCheck className="w-8 h-8 text-teal-600" />;
+        return <ShieldCheck className="w-8 h-8 text-teal-600" aria-hidden="true" />;
     }
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="permission-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
+    <PortalModal
+      isOpen={permissionModal.isOpen}
+      onClose={closePermissionModal}
+      ariaLabelledBy="permission-modal-title"
+      backdropClassName="bg-black/70"
     >
       <div
         className={`w-full max-w-lg rounded-3xl shadow-2xl p-6 sm:p-7 ${
@@ -75,6 +74,7 @@ export const PermissionModal: React.FC = () => {
             {t.deny}
           </button>
           <button
+            type="button"
             onClick={() => {
               permissionModal.onGranted();
               closePermissionModal();
@@ -85,6 +85,6 @@ export const PermissionModal: React.FC = () => {
           </button>
         </div>
       </div>
-    </div>
+    </PortalModal>
   );
 };

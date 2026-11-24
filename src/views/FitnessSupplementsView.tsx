@@ -4,18 +4,29 @@ import { SectionHero } from '../components/ui/SectionHero';
 import { SupplementsIllustration } from '../components/ContextualIllustrations';
 import { educationalSupplements } from '../data/syntheticData';
 import { SupplementInfo } from '../types';
+import { supabase } from '../lib/supabase';
+import { formatDisplayDate } from '../utils/healthFormatters';
 import {
   Sparkles,
   ShieldAlert,
   AlertTriangle,
   BookOpen,
-  Info,
-  Heart,
-  Search,
   Apple,
   Stethoscope,
-  ArrowRight
+  Droplets,
+  Footprints,
+  Timer,
+  Plus,
+  CheckCircle2
 } from 'lucide-react';
+
+interface DailyActivityEntry {
+  date: string;
+  steps: number;
+  walkMinutes: number;
+  waterGlasses: number;
+  notes?: string;
+}
 
 interface EducationalGuidanceResult {
   problemSummary: string;
@@ -33,9 +44,129 @@ interface EducationalGuidanceResult {
 }
 
 export const FitnessSupplementsView: React.FC = () => {
-  const { t, showToast } = useApp();
+  const { showToast, currentUser } = useApp();
 
   const [supplementCategory, setSupplementCategory] = useState<'all' | 'muscle' | 'bones' | 'hair-skin' | 'general'>('all');
+
+  // Lightweight Daily Activity & Hydration Logger (per-user persisted)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [activityLogs, setActivityLogs] = useState<DailyActivityEntry[]>([]);
+  const [stepsInput, setStepsInput] = useState<number>(3500);
+  const [walkMinutesInput, setWalkMinutesInput] = useState<number>(20);
+  const [waterGlassesInput, setWaterGlassesInput] = useState<number>(4);
+  const [isSavingActivity, setIsSavingActivity] = useState<boolean>(false);
+
+  const getActivityStorageKey = (uid: string) => `healyaar_user_${uid}_activity_logs`;
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!currentUser?.id) {
+      setActivityLogs([]);
+      return;
+    }
+
+    const loadActivity = async () => {
+      let localEntries: DailyActivityEntry[] = [];
+      try {
+        const raw = localStorage.getItem(getActivityStorageKey(currentUser.id));
+        if (raw) localEntries = JSON.parse(raw);
+      } catch {
+        // ignore
+      }
+
+      if (supabase) {
+        try {
+          const { data } = await supabase
+            .from('activity_logs')
+            .select('log_date, steps, walk_minutes, water_glasses, notes')
+            .eq('user_id', currentUser.id)
+            .order('log_date', { ascending: false })
+            .limit(7);
+          if (data && data.length > 0) {
+            localEntries = data.map((row: any) => ({
+              date: row.log_date,
+              steps: row.steps || 0,
+              walkMinutes: row.walk_minutes || 0,
+              waterGlasses: row.water_glasses || 0,
+              notes: row.notes || undefined
+            }));
+          }
+        } catch {
+          // Graceful fallback to user-scoped localStorage
+        }
+      }
+
+      if (!isMounted) return;
+      setActivityLogs(localEntries);
+      const todayEntry = localEntries.find((e) => e.date === todayStr);
+      if (todayEntry) {
+        setStepsInput(todayEntry.steps);
+        setWalkMinutesInput(todayEntry.walkMinutes);
+        setWaterGlassesInput(todayEntry.waterGlasses);
+      }
+    };
+
+    void loadActivity();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.id, todayStr]);
+
+  useEffect(() => {
+    const handleReset = () => {
+      setActivityLogs([]);
+      setStepsInput(0);
+      setWalkMinutesInput(0);
+      setWaterGlassesInput(0);
+    };
+    window.addEventListener('healyaar_session_reset', handleReset);
+    return () => window.removeEventListener('healyaar_session_reset', handleReset);
+  }, []);
+
+  const persistDailyActivity = async (nextSteps: number, nextWalk: number, nextWater: number, toastLabel?: string) => {
+    const entry: DailyActivityEntry = {
+      date: todayStr,
+      steps: Math.max(0, nextSteps),
+      walkMinutes: Math.max(0, nextWalk),
+      waterGlasses: Math.max(0, nextWater)
+    };
+
+    setActivityLogs((prev) => {
+      const updated = [entry, ...prev.filter((item) => item.date !== todayStr)].slice(0, 7);
+      if (currentUser?.id) {
+        try {
+          localStorage.setItem(getActivityStorageKey(currentUser.id), JSON.stringify(updated));
+        } catch {
+          // ignore
+        }
+      }
+      return updated;
+    });
+
+    if (currentUser?.id && supabase) {
+      setIsSavingActivity(true);
+      try {
+        await supabase
+          .from('activity_logs')
+          .upsert(
+            {
+              user_id: currentUser.id,
+              log_date: todayStr,
+              steps: entry.steps,
+              walk_minutes: entry.walkMinutes,
+              water_glasses: entry.waterGlasses
+            },
+            { onConflict: 'user_id,log_date' }
+          );
+      } catch {
+        // Already saved optimistically in user-scoped localStorage
+      } finally {
+        setIsSavingActivity(false);
+      }
+    }
+
+    if (toastLabel) showToast(toastLabel);
+  };
 
   // "Describe Your Problem" State
   const [problemInput, setProblemInput] = useState<string>('');
@@ -300,14 +431,164 @@ export const FitnessSupplementsView: React.FC = () => {
     <div className="max-w-5xl mx-auto space-y-8 pb-16 animate-fade-in">
       {/* 1. Header */}
       <SectionHero
-        title="Dietary Supplements & Evidence Library"
+        title="Fitness, Hydration & Supplements Library"
         badge={{
           icon: Sparkles,
-          text: 'Non-Diagnostic Guidance',
+          text: 'Daily Movement & Evidence',
           variant: 'teal'
         }}
         illustration={<SupplementsIllustration size="md" />}
       />
+
+      {/* ==============================================================
+          1B. LIGHTWEIGHT DAILY ACTIVITY & HYDRATION LOGGER
+      ============================================================== */}
+      <section className="interactive-card bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300 text-xs font-bold border border-indigo-200 dark:border-indigo-800 mb-1">
+              <Footprints className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Daily Activity & Hydration Logger</span>
+            </div>
+            <h2 className="text-xl font-black text-slate-900 dark:text-white">
+              Today&apos;s Movement & Water Tracker ({formatDisplayDate(todayStr)})
+            </h2>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const nextWater = waterGlassesInput + 1;
+                setWaterGlassesInput(nextWater);
+                void persistDailyActivity(stepsInput, walkMinutesInput, nextWater, `Hydration updated: ${nextWater} glasses today.`);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-sky-50 dark:bg-sky-950/50 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-xs font-bold flex items-center gap-1.5 transition-colors"
+            >
+              <Droplets className="w-4 h-4 text-sky-600 dark:text-sky-400" aria-hidden="true" />
+              <span>+1 Glass Water</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const nextWalk = walkMinutesInput + 10;
+                const nextSteps = stepsInput + 1000;
+                setWalkMinutesInput(nextWalk);
+                setStepsInput(nextSteps);
+                void persistDailyActivity(nextSteps, nextWalk, waterGlassesInput, `Added 10 min walk (${nextWalk} min / ${nextSteps} steps).`);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold flex items-center gap-1.5 transition-colors"
+            >
+              <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              <span>+10 Min Walk</span>
+            </button>
+          </div>
+        </div>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void persistDailyActivity(stepsInput, walkMinutesInput, waterGlassesInput, 'Daily activity & hydration saved to your private log.');
+          }}
+          className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end"
+        >
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-1.5">
+            <label htmlFor="daily-steps-input" className="text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+              <Footprints className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+              <span>Steps (Goal: 7,000)</span>
+            </label>
+            <input
+              id="daily-steps-input"
+              type="number"
+              min={0}
+              max={60000}
+              value={stepsInput}
+              onChange={(e) => setStepsInput(Math.max(0, parseInt(e.target.value, 10) || 0))}
+              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-base font-black text-slate-900 dark:text-white"
+            />
+            <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-indigo-600 rounded-full transition-all"
+                style={{ width: `${Math.min(100, Math.round((stepsInput / 7000) * 100))}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-1.5">
+            <label htmlFor="daily-walk-input" className="text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+              <Timer className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              <span>Walk Minutes (Goal: 30)</span>
+            </label>
+            <input
+              id="daily-walk-input"
+              type="number"
+              min={0}
+              max={600}
+              value={walkMinutesInput}
+              onChange={(e) => setWalkMinutesInput(Math.max(0, parseInt(e.target.value, 10) || 0))}
+              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-base font-black text-slate-900 dark:text-white"
+            />
+            <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-600 rounded-full transition-all"
+                style={{ width: `${Math.min(100, Math.round((walkMinutesInput / 30) * 100))}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-1.5">
+            <label htmlFor="daily-water-input" className="text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+              <Droplets className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
+              <span>Water Glasses (Goal: 8)</span>
+            </label>
+            <input
+              id="daily-water-input"
+              type="number"
+              min={0}
+              max={30}
+              value={waterGlassesInput}
+              onChange={(e) => setWaterGlassesInput(Math.max(0, parseInt(e.target.value, 10) || 0))}
+              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-base font-black text-slate-900 dark:text-white"
+            />
+            <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-sky-500 rounded-full transition-all"
+                style={{ width: `${Math.min(100, Math.round((waterGlassesInput / 8) * 100))}%` }}
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isSavingActivity}
+            className="h-12 px-5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-sm shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+            <span>{isSavingActivity ? 'Saving...' : 'Save Today'}</span>
+          </button>
+        </form>
+
+        {activityLogs.length > 0 && (
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-2">
+              Recent Activity & Hydration Logs
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {activityLogs.slice(0, 5).map((entry) => (
+                <div
+                  key={entry.date}
+                  className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs flex items-center gap-2.5"
+                >
+                  <span className="font-extrabold text-slate-900 dark:text-white">{formatDisplayDate(entry.date)}</span>
+                  <span className="text-indigo-700 dark:text-indigo-300 font-semibold">{entry.steps.toLocaleString()} steps</span>
+                  <span className="text-emerald-700 dark:text-emerald-300 font-semibold">{entry.walkMinutes} min</span>
+                  <span className="text-sky-700 dark:text-sky-300 font-semibold">{entry.waterGlasses} glasses</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* ==============================================================
           2. "DESCRIBE YOUR PROBLEM" INPUT AREA

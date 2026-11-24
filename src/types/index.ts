@@ -3,6 +3,7 @@ export type SupportedLanguage = 'en' | 'hi' | 'mr' | 'ta' | 'te' | 'bn' | 'gu';
 export type TextSize = 'normal' | 'large' | 'xlarge';
 
 export type NavTab = 
+  | 'landing'
   | 'home'
   | 'assistant'
   | 'symptoms'
@@ -16,7 +17,9 @@ export type NavTab =
   | 'reminders'
   | 'login'
   | 'privacy'
-  | 'terms';
+  | 'terms'
+  | 'cookies'
+  | 'refund';
 
 export type { AuthUser, LoginCredentials, SignUpCredentials, AuthResult } from '../services/authService';
 export * from './rag';
@@ -27,6 +30,18 @@ export interface VerifiedSource {
   organization: string;
   year?: number | string;
   topic?: string;
+}
+
+export interface ClinicianSOAPNote {
+  subjective: string;
+  objective: string;
+  assessment: string;
+  plan: string[];
+  differentials: { condition: string; likelihood: 'Primary Consideration' | 'Secondary' | 'Rule Out'; rationale: string }[];
+  uncertaintyMarkers: string[];
+  drugInteractionWarnings: string[];
+  reviewedByClinician?: boolean;
+  reviewedAt?: string;
 }
 
 export interface ChatMessage {
@@ -47,6 +62,8 @@ export interface ChatMessage {
   };
   uncertaintyNote?: string;
   plainLanguageGlossary?: { term: string; explanation: string }[];
+  copilotMode?: 'patient' | 'clinician';
+  soapNote?: ClinicianSOAPNote;
 }
 
 export interface LabTestMetric {

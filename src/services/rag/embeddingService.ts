@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { filterRAGStopWords } from '../../utils/healthFormatters';
 
 const VECTOR_DIMENSION = 128;
 
@@ -203,7 +204,7 @@ export async function computeEmbedding(text: string): Promise<number[]> {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.embedContent({
-        model: 'text-embedding-004',
+        model: 'gemini-embedding-2',
         contents: text
       });
 
@@ -261,7 +262,9 @@ export function computeBM25Score(
   documentText: string,
   metadataKeywords: string[] = []
 ): { score: number; matchedKeywords: string[] } {
-  const queryTokens = Array.from(new Set(tokenizeText(query)));
+  const rawQueryTokens = Array.from(new Set(tokenizeText(query)));
+  const meaningfulTokens = filterRAGStopWords(rawQueryTokens);
+  const queryTokens = meaningfulTokens.length > 0 ? meaningfulTokens : rawQueryTokens;
   const docTokens = tokenizeText(documentText);
   const metaTokens = metadataKeywords.map(k => k.toLowerCase());
 
@@ -306,6 +309,6 @@ export function computeBM25Score(
 
   return {
     score: normalizedScore,
-    matchedKeywords
+    matchedKeywords: filterRAGStopWords(matchedKeywords)
   };
 }

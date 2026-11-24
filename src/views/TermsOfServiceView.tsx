@@ -1,125 +1,109 @@
 import React from 'react';
-import { ArrowLeft, AlertTriangle, FileText, PhoneCall, CheckCircle, Scale, HelpCircle } from 'lucide-react';
+import { useApp } from '../context/AppContext';
+import { FileText, AlertOctagon, ArrowLeft, ShieldAlert } from 'lucide-react';
 
-interface TermsOfServiceViewProps {
-  onBack: () => void;
-}
+export const TermsOfServiceView: React.FC = () => {
+  const { setTab, currentUser, openEmergencyModal } = useApp();
 
-export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({ onBack }) => {
   return (
-    <div className="max-w-4xl mx-auto py-4 sm:py-8 px-2 sm:px-4 space-y-6 animate-fade-in text-slate-900 dark:text-slate-100">
-      {/* Header with Navigation */}
-      <div className="flex items-center justify-between pb-4 border-b border-slate-200/80 dark:border-slate-800">
+    <div className="max-w-4xl mx-auto py-8 px-4 sm:px-6 space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between gap-3">
         <button
           type="button"
-          onClick={onBack}
-          className="interactive-button px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-2"
+          onClick={() => setTab(currentUser ? 'home' : 'landing')}
+          className="inline-flex items-center gap-2 text-sm font-bold text-teal-700 dark:text-teal-400 hover:underline"
         >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back</span>
+          <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+          <span>{currentUser ? 'Back to Dashboard' : 'Back to Home'}</span>
         </button>
-        <div className="text-right">
-          <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-            Effective: October 2026
-          </span>
+
+        {!currentUser && (
+          <button
+            type="button"
+            onClick={() => setTab('login')}
+            className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-colors"
+          >
+            Log In
+          </button>
+        )}
+      </div>
+
+      <article className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-10 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
+        <div className="flex items-center gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
+          <div className="p-3 bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 rounded-2xl">
+            <FileText className="w-7 h-7" aria-hidden="true" />
+          </div>
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white">
+              Terms &amp; Conditions
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Effective Date: November 2026 • Policy Version 2.0
+            </p>
+          </div>
         </div>
-      </div>
 
-      {/* Main Title */}
-      <div className="space-y-2">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 text-xs font-bold border border-teal-200/60 dark:border-teal-800/60">
-          <FileText className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-          <span>User Agreement & Safety Guidelines</span>
+        <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm text-rose-950 dark:text-rose-200">
+          <div className="flex items-start gap-2.5">
+            <AlertOctagon className="w-5 h-5 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <p>
+              <strong>Medical Disclaimer:</strong> HealYaar is an educational AI health literacy tool, NOT a licensed doctor, diagnostic service, or emergency responder.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={openEmergencyModal}
+            className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold whitespace-nowrap self-start sm:self-center"
+          >
+            SOS 108 / 112
+          </button>
         </div>
-        <h1 className="text-2xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tight">
-          Terms of Service
-        </h1>
-      </div>
 
-      {/* Owner Identity Notice & Placeholders */}
-      <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200 text-xs leading-relaxed space-y-1">
-        <p className="font-bold flex items-center gap-1.5">
-          <HelpCircle className="w-4 h-4 flex-shrink-0" />
-          <span>Legal Parties & Scope</span>
-        </p>
-        <p>
-          These Terms of Service govern your use of the HealYaar web platform and associated software provided by <strong>[Legal Entity / App Owner Name - To be provided by owner]</strong> (&quot;HealYaar&quot;, &quot;we&quot;, &quot;our&quot;). By creating an account or accessing the platform, you agree to these Terms. If you do not agree, do not use the service.
-        </p>
-      </div>
+        <div className="space-y-5 text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+              1. Educational Scope &amp; No Doctor-Patient Relationship
+            </h2>
+            <p>
+              All plain-language lab summaries, nutrition calculations, symptom guidance, and Clinician Copilot SOAP drafts generated by HealYaar are strictly informational. Using HealYaar does not create a doctor-patient relationship. Never ignore professional medical advice or delay seeking emergency care because of content read on this platform.
+            </p>
+          </section>
 
-      {/* Section 1: Crucial Medical Disclaimer */}
-      <div className="interactive-card bg-rose-50/40 dark:bg-rose-950/20 rounded-3xl p-6 sm:p-8 border border-rose-200/80 dark:border-rose-900/60 space-y-4">
-        <div className="flex items-center gap-2 text-rose-700 dark:text-rose-400 font-extrabold text-lg">
-          <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-          <span>1. Crucial Medical Notice & Limitation of Purpose</span>
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+              2. Emergency Red Flags
+            </h2>
+            <p>
+              If you experience chest pain, sudden shortness of breath, facial drooping, slurred speech, severe bleeding, or thoughts of self-harm, stop using the app immediately and call <strong>108</strong> (Ambulance), <strong>112</strong> (National Emergency), or <strong>14416</strong> (Tele-MANAS 24/7 Mental Health Helpline).
+            </p>
+          </section>
+
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+              3. Clinician Copilot Mode Verification
+            </h2>
+            <p>
+              Healthcare professionals using Clinician Copilot Mode are solely responsible for verifying all SOAP notes, differential considerations, and drug-interaction flags against physical examination findings and primary laboratory records before clinical action.
+            </p>
+          </section>
+
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+              4. Account Security &amp; Acceptable Use
+            </h2>
+            <p>
+              You agree to safeguard your account credentials, upload only health records you are authorized to access, and refrain from attempting to bypass authentication or Row-Level Security protections.
+            </p>
+          </section>
+
+          <section className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 flex items-start gap-2.5 text-xs text-amber-950 dark:text-amber-200">
+            <ShieldAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <p>
+              <strong>Prescription &amp; Pharmacy Compliance:</strong> HealYaar does not dispense or sell Schedule H/H1 medications. Always present a valid physician prescription to a licensed pharmacist.
+            </p>
+          </section>
         </div>
-        <div className="space-y-3 text-xs sm:text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
-          <p>
-            <strong>HealYaar is NOT a licensed medical practice, diagnostic clinic, or prescribing healthcare provider.</strong>
-          </p>
-          <ul className="space-y-1.5 list-disc list-inside">
-            <li>The content, AI assistant responses, report explanations, and nutritional summaries generated by HealYaar are provided <strong>strictly for educational and general information purposes</strong>.</li>
-            <li>Nothing provided through HealYaar should be construed as medical diagnosis, prescription, or clinical treatment advice.</li>
-            <li>Never disregard professional medical advice or delay seeking treatment because of information read or generated through HealYaar.</li>
-            <li>In any life-threatening situation or severe symptom onset, immediately call emergency services (<strong>112</strong> / <strong>108</strong> in India, or your local emergency dispatch).</li>
-          </ul>
-        </div>
-      </div>
-
-      {/* Section 2: Account Security */}
-      <div className="interactive-card bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
-        <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
-          <CheckCircle className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-          <span>2. User Accounts & Security</span>
-        </h2>
-        <div className="space-y-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-          <p>
-            When registering an account with HealYaar:
-          </p>
-          <ul className="space-y-1.5 list-disc list-inside">
-            <li>You must provide accurate, current, and verifiable contact details (such as your personal email address).</li>
-            <li>You are solely responsible for maintaining the confidentiality of your account login credentials.</li>
-            <li>You agree to notify HealYaar immediately of any unauthorized use or security compromise of your account.</li>
-          </ul>
-        </div>
-      </div>
-
-      {/* Section 3: Synthetic Demonstrations & Data Accuracy */}
-      <div className="interactive-card bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
-        <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
-          <Scale className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-          <span>3. Synthetic Content & Third-Party References</span>
-        </h2>
-        <div className="space-y-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-          <p>
-            Doctor finder catalogs, sample lab reports, and medication databases include synthetic and aggregated demonstration records designed for workflow illustration. Ratings and distance figures are computed relative to synthetic benchmarks or device coordinates and do not constitute professional endorsement or verified clinical accreditation.
-          </p>
-        </div>
-      </div>
-
-      {/* Section 4: Acceptable Use & Prohibited Acts */}
-      <div className="interactive-card bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
-        <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
-          <FileText className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-          <span>4. Acceptable Use and Platform Integrity</span>
-        </h2>
-        <ul className="space-y-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed list-disc list-inside">
-          <li>You may not use HealYaar for any unlawful, fraudulent, or harmful activity.</li>
-          <li>You may not attempt to reverse engineer, decompile, scrape at scale, or probe vulnerabilities of the platform infrastructure without authorization.</li>
-          <li>You may not transmit content containing malicious scripts, viruses, or unauthorized automated requests.</li>
-        </ul>
-      </div>
-
-      {/* Section 5: Governing Law & Jurisdiction */}
-      <div className="interactive-card bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
-        <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
-          <Scale className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-          <span>5. Governing Law and Dispute Resolution</span>
-        </h2>
-        <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-          These Terms are governed by and construed in accordance with the laws of <strong>[Governing Jurisdiction - To be specified by owner]</strong>, without regard to conflict of law provisions. Any legal action or dispute arising from your use of HealYaar shall be subject to the exclusive jurisdiction of the competent courts in <strong>[Governing Court City/State]</strong>.
-        </p>
-      </div>
+      </article>
     </div>
   );
 };

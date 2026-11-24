@@ -9,6 +9,7 @@ import {
   CycleCalculationResult,
   CyclePhaseInfo
 } from '../services/cycleService';
+import { formatDisplayDate } from '../utils/healthFormatters';
 import {
   CalendarHeart,
   AlertTriangle,
@@ -18,7 +19,10 @@ import {
   Sparkles,
   Flower2,
   RefreshCw,
-  Compass
+  Compass,
+  Edit3,
+  X,
+  CalendarDays
 } from 'lucide-react';
 
 export const PeriodTrackerView: React.FC = () => {
@@ -26,6 +30,8 @@ export const PeriodTrackerView: React.FC = () => {
     currentUser,
     periodLogs,
     savePeriodLog,
+    updatePeriodLog,
+    deletePeriodLog,
     deletePeriodLogs,
     showToast
   } = useApp();
@@ -46,6 +52,7 @@ export const PeriodTrackerView: React.FC = () => {
   );
   const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>(['Mild Cramps']);
   const [flowIntensity, setFlowIntensity] = useState<'Light' | 'Medium' | 'Heavy'>('Medium');
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
 
   // Motivational quote state
   const [quoteIndex, setQuoteIndex] = useState<number>(0);
@@ -100,22 +107,82 @@ export const PeriodTrackerView: React.FC = () => {
     e.preventDefault();
     if (!inputStartDate) return;
 
-    savePeriodLog({
-      startDate: inputStartDate,
-      cycleLengthDays,
-      periodDurationDays,
-      symptoms: selectedSymptoms,
-      flowIntensity
-    });
+    if (editingEntryId) {
+      updatePeriodLog({
+        id: editingEntryId,
+        startDate: inputStartDate,
+        cycleLengthDays,
+        periodDurationDays,
+        symptoms: selectedSymptoms,
+        flowIntensity
+      });
+      setEditingEntryId(null);
+      showToast('Cycle entry updated.');
+    } else {
+      savePeriodLog({
+        startDate: inputStartDate,
+        cycleLengthDays,
+        periodDurationDays,
+        symptoms: selectedSymptoms,
+        flowIntensity
+      });
+      showToast('Cycle entry saved privately on your device!');
+    }
 
-    saveCyclePreferences({
-      lastPeriodStart: inputStartDate,
-      typicalCycleLength: cycleLengthDays,
-      periodDuration: periodDurationDays
-    });
-
-    showToast('🌸 Cycle entry saved privately on your device!');
+    saveCyclePreferences(
+      {
+        lastPeriodStart: inputStartDate,
+        typicalCycleLength: cycleLengthDays,
+        periodDuration: periodDurationDays
+      },
+      currentUser?.id
+    );
   };
+
+  const handleStartEditEntry = (entry: (typeof periodLogs)[number]) => {
+    setEditingEntryId(entry.id);
+    setInputStartDate(entry.startDate);
+    setCycleLengthDays(entry.cycleLengthDays);
+    setPeriodDurationDays(entry.periodDurationDays);
+    setFlowIntensity(entry.flowIntensity || 'Medium');
+    setSelectedSymptoms(entry.symptoms || []);
+    showToast(`Editing cycle entry from ${formatDisplayDate(entry.startDate)}`);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingEntryId(null);
+  };
+
+  // Visual 28-to-cycleLength calendar day strip cells
+  const calendarDays = useMemo(() => {
+    const start = new Date(`${inputStartDate}T00:00:00`);
+    const validStart = Number.isNaN(start.getTime()) ? new Date() : start;
+    const total = Math.max(21, Math.min(45, cycleLengthDays || 28));
+    const ovulDay = Math.max(periodDurationDays + 2, total - 14);
+
+    return Array.from({ length: total }, (_, idx) => {
+      const cycleDay = idx + 1;
+      const cellDate = new Date(validStart);
+      cellDate.setDate(validStart.getDate() + idx);
+
+      let phaseType: 'menstrual' | 'follicular' | 'ovulation' | 'luteal' = 'luteal';
+      if (cycleDay <= periodDurationDays) {
+        phaseType = 'menstrual';
+      } else if (cycleDay < ovulDay - 2) {
+        phaseType = 'follicular';
+      } else if (cycleDay <= ovulDay + 1) {
+        phaseType = 'ovulation';
+      }
+
+      return {
+        cycleDay,
+        dateNum: cellDate.getDate(),
+        monthShort: cellDate.toLocaleDateString('en-GB', { month: 'short' }),
+        phaseType,
+        isCurrent: cycleDay === cycleData.currentCycleDay
+      };
+    });
+  }, [inputStartDate, cycleLengthDays, periodDurationDays, cycleData.currentCycleDay]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-16 animate-fade-in">
@@ -290,7 +357,60 @@ export const PeriodTrackerView: React.FC = () => {
             </div>
           </div>
 
-          {/* 4 Phase Segment Cards */}
+          {/* Visual Monthly Cycle Calendar Strip */}
+          <div className="space-y-3 pt-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-rose-900 dark:text-rose-200">
+                <CalendarDays className="w-4 h-4 text-rose-600 dark:text-rose-400" aria-hidden="true" />
+                <span>Visual Cycle Calendar ({cycleLengthDays}-Day Map)</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500" aria-hidden="true" /> Period
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-pink-300 dark:bg-pink-700" aria-hidden="true" /> Follicular
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" aria-hidden="true" /> Fertile / Ovulation
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-purple-400 dark:bg-purple-600" aria-hidden="true" /> Luteal
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+              {calendarDays.map((day) => {
+                const phaseBg =
+                  day.phaseType === 'menstrual'
+                    ? 'bg-rose-500 text-white border-rose-600'
+                    : day.phaseType === 'ovulation'
+                    ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700'
+                    : day.phaseType === 'follicular'
+                    ? 'bg-pink-50 dark:bg-pink-950/40 text-rose-900 dark:text-rose-200 border-pink-200 dark:border-pink-900'
+                    : 'bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 border-purple-200 dark:border-purple-800';
+
+                return (
+                  <div
+                    key={day.cycleDay}
+                    title={`Cycle Day ${day.cycleDay} (${day.dateNum} ${day.monthShort}) — ${day.phaseType}`}
+                    className={`rounded-xl p-1.5 sm:p-2 border text-center transition-all ${phaseBg} ${
+                      day.isCurrent
+                        ? 'ring-2 ring-offset-1 ring-rose-600 dark:ring-rose-400 font-black scale-[1.03] shadow-sm'
+                        : ''
+                    }`}
+                  >
+                    <div className="text-[9px] uppercase opacity-75 leading-none">D{day.cycleDay}</div>
+                    <div className="text-xs sm:text-sm font-extrabold leading-tight mt-0.5">{day.dateNum}</div>
+                    <div className="text-[9px] opacity-80 leading-none hidden sm:block">{day.monthShort}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 4 Phase Segment Cards (inline "You are here" pill + non-wrapping day ranges) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
             {cycleData.allPhases.map((phase) => {
               const isCurrent = cycleData.currentPhase.type === phase.type;
@@ -301,30 +421,29 @@ export const PeriodTrackerView: React.FC = () => {
                   key={phase.type}
                   type="button"
                   onClick={() => setSelectedPhaseType(phase.type)}
-                  className={`p-4 rounded-2xl text-left transition-all relative flex flex-col justify-between border-2 ${
+                  className={`p-4 rounded-2xl text-left transition-all flex flex-col justify-between border-2 ${
                     isSelected
                       ? 'border-rose-400 bg-rose-50/90 dark:bg-rose-950/60 shadow-xs'
-                      : 'border-rose-100 dark:border-rose-900/40 bg-white/80 dark:bg-slate-850 hover:bg-rose-50/50 dark:hover:bg-rose-950/30'
+                      : 'border-rose-100 dark:border-rose-900/40 bg-white/80 dark:bg-slate-900/60 hover:bg-rose-50/50 dark:hover:bg-rose-950/30'
                   }`}
                 >
-                  {/* "You Are Here" Badge on Active Phase */}
-                  {isCurrent && (
-                    <div className="absolute -top-3 right-3 px-2 py-0.5 bg-rose-600 text-white font-extrabold text-[10px] rounded-full shadow-xs flex items-center gap-1 animate-pulse">
-                      <span>📍 You are here</span>
-                    </div>
-                  )}
-
-                  <div>
-                    <div className="flex items-center justify-between gap-1 mb-1.5">
-                      <span className="text-[10px] font-bold text-rose-500 dark:text-rose-400 uppercase tracking-wide">
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wide whitespace-nowrap">
                         {phase.dayRangeStr}
                       </span>
-                      <span className="text-xs">{phase.badge}</span>
+                      {isCurrent ? (
+                        <span className="px-2 py-0.5 bg-rose-600 text-white font-extrabold text-[10px] rounded-full shadow-2xs whitespace-nowrap">
+                          You are here
+                        </span>
+                      ) : (
+                        <span className="text-xs" aria-hidden="true">{phase.badge}</span>
+                      )}
                     </div>
                     <h4 className="font-extrabold text-sm sm:text-base text-rose-950 dark:text-rose-100">
                       {phase.title}
                     </h4>
-                    <p className="text-[11px] text-rose-800/80 dark:text-rose-300/80 mt-1 line-clamp-2">
+                    <p className="text-[11px] text-rose-800/80 dark:text-rose-300/80 line-clamp-2">
                       {phase.description}
                     </p>
                   </div>
@@ -476,12 +595,24 @@ export const PeriodTrackerView: React.FC = () => {
                 </div>
               </div>
 
-              <button
-                type="submit"
-                className="w-full py-3.5 bg-gradient-to-r from-rose-400 to-pink-500 hover:from-rose-500 hover:to-pink-600 text-white font-black rounded-2xl shadow-sm transition-all active:scale-95 text-sm"
-              >
-                Save Cycle Entry Privately
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-3.5 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-black rounded-2xl shadow-sm transition-all active:scale-95 text-sm"
+                >
+                  {editingEntryId ? 'Update Cycle Entry' : 'Save Cycle Entry Privately'}
+                </button>
+                {editingEntryId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="px-4 py-3.5 rounded-2xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-sm hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1"
+                  >
+                    <X className="w-4 h-4" aria-hidden="true" />
+                    <span>Cancel</span>
+                  </button>
+                )}
+              </div>
             </form>
           </section>
 
@@ -551,11 +682,15 @@ export const PeriodTrackerView: React.FC = () => {
               {periodLogs.map((entry) => (
                 <div
                   key={entry.id}
-                  className="p-4 rounded-2xl bg-rose-50/40 dark:bg-slate-800/70 border border-rose-100 dark:border-rose-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm"
+                  className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm transition-colors ${
+                    editingEntryId === entry.id
+                      ? 'bg-rose-100/70 dark:bg-rose-950/60 border-rose-400'
+                      : 'bg-rose-50/40 dark:bg-slate-800/70 border-rose-100 dark:border-rose-900/40'
+                  }`}
                 >
                   <div>
                     <div className="font-bold text-rose-950 dark:text-rose-100 text-base">
-                      Started on: {entry.startDate}
+                      Started on: {formatDisplayDate(entry.startDate)}
                     </div>
                     <div className="text-xs text-rose-800/80 dark:text-rose-300/80 mt-0.5">
                       Duration: {entry.periodDurationDays} days • Typical Cycle: {entry.cycleLengthDays} days • Flow: {entry.flowIntensity}
@@ -571,8 +706,25 @@ export const PeriodTrackerView: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-xl border border-emerald-200 dark:border-emerald-800 w-fit">
-                    Saved Privately
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleStartEditEntry(entry)}
+                      aria-label={`Edit cycle log from ${entry.startDate}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-rose-100 dark:hover:bg-rose-950/60 text-rose-800 dark:text-rose-200 border border-rose-200 dark:border-rose-800 font-bold text-xs transition-colors"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deletePeriodLog(entry.id)}
+                      aria-label={`Delete cycle log from ${entry.startDate}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-rose-600 hover:text-white text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-xs transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Delete</span>
+                    </button>
                   </div>
                 </div>
               ))}

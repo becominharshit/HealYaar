@@ -100,6 +100,86 @@ export const periodService = {
   },
 
   /**
+   * Updates an existing period cycle entry
+   */
+  async updateCycle(userId: string, entry: PeriodCycleEntry): Promise<PeriodCycleEntry> {
+    if (!userId) return entry;
+    this.saveLocalCycle(userId, entry);
+
+    if (!isSupabaseConfigured()) {
+      return entry;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('period_cycles')
+        .update({
+          start_date: entry.startDate,
+          end_date: entry.endDate || null,
+          cycle_length_days: entry.cycleLengthDays,
+          period_duration_days: entry.periodDurationDays,
+          symptoms: entry.symptoms || [],
+          flow_intensity: entry.flowIntensity || null,
+          notes: entry.notes || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', entry.id)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (error || !data) {
+        return entry;
+      }
+
+      return {
+        id: data.id,
+        startDate: data.start_date,
+        endDate: data.end_date || undefined,
+        cycleLengthDays: data.cycle_length_days,
+        periodDurationDays: data.period_duration_days,
+        symptoms: data.symptoms || [],
+        flowIntensity: data.flow_intensity || undefined,
+        notes: data.notes || undefined
+      };
+    } catch (err) {
+      console.warn('periodService.updateCycle exception:', err);
+      return entry;
+    }
+  },
+
+  /**
+   * Deletes a single period cycle entry by ID
+   */
+  async deleteCycle(userId: string, cycleId: string): Promise<boolean> {
+    if (!userId || !cycleId) return false;
+    try {
+      const existing = this.getLocalCycles(userId);
+      const updated = existing.filter((e) => e.id !== cycleId);
+      localStorage.setItem(`healyaar_user_${userId}_period_logs`, JSON.stringify(updated));
+    } catch {}
+
+    if (!isSupabaseConfigured()) return true;
+
+    try {
+      const { error } = await supabase
+        .from('period_cycles')
+        .delete()
+        .eq('id', cycleId)
+        .eq('user_id', userId);
+
+      if (error) {
+        console.warn('Error deleting single period cycle from Supabase:', error);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn('periodService.deleteCycle exception:', err);
+      return false;
+    }
+  },
+
+  /**
    * Deletes all period cycle logs for a user
    */
   async deleteCycles(userId: string): Promise<boolean> {

@@ -267,8 +267,127 @@ CREATE POLICY "Users can insert their own food analyses"
   ON public.food_analyses FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
+CREATE POLICY "Users can update their own food analyses"
+  ON public.food_analyses FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
 CREATE POLICY "Users can delete their own food analyses"
   ON public.food_analyses FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- Complete DELETE policy for profiles so users can delete their own profile row
+CREATE POLICY "Users can delete their own profile"
+  ON public.profiles FOR DELETE
+  USING (auth.uid() = id);
+
+-- =============================================================================
+-- 7b. MEAL LOGS (Structured Indian Meal & Nutrition History)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS public.meal_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  logged_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  meal_type TEXT NOT NULL DEFAULT 'Meal',
+  description TEXT NOT NULL,
+  calories INT NOT NULL DEFAULT 0,
+  protein_g NUMERIC(6,1) NOT NULL DEFAULT 0,
+  carbs_g NUMERIC(6,1) NOT NULL DEFAULT 0,
+  fat_g NUMERIC(6,1) NOT NULL DEFAULT 0,
+  fiber_g NUMERIC(6,1) NOT NULL DEFAULT 0,
+  items JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_meal_logs_user ON public.meal_logs(user_id, logged_date DESC);
+
+ALTER TABLE public.meal_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own meal logs"
+  ON public.meal_logs FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own meal logs"
+  ON public.meal_logs FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own meal logs"
+  ON public.meal_logs FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own meal logs"
+  ON public.meal_logs FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- =============================================================================
+-- 7c. DAILY ACTIVITY & HYDRATION LOGS
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS public.activity_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  log_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  steps INT NOT NULL DEFAULT 0,
+  walk_minutes INT NOT NULL DEFAULT 0,
+  water_glasses INT NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, log_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON public.activity_logs(user_id, log_date DESC);
+
+ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own activity logs"
+  ON public.activity_logs FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own activity logs"
+  ON public.activity_logs FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own activity logs"
+  ON public.activity_logs FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own activity logs"
+  ON public.activity_logs FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- =============================================================================
+-- 7d. CONSENT RECORDS (Auditable Policy Acceptance Log)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS public.consent_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  consent_type TEXT NOT NULL DEFAULT 'terms_and_privacy',
+  policy_version TEXT NOT NULL DEFAULT '2.0',
+  accepted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_consent_records_user ON public.consent_records(user_id, accepted_at DESC);
+
+ALTER TABLE public.consent_records ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own consent records"
+  ON public.consent_records FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own consent records"
+  ON public.consent_records FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own consent records"
+  ON public.consent_records FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own consent records"
+  ON public.consent_records FOR DELETE
   USING (auth.uid() = user_id);
 
 -- =============================================================================
@@ -322,3 +441,5 @@ CREATE TRIGGER set_medical_reports_updated_at BEFORE UPDATE ON public.medical_re
 CREATE TRIGGER set_prescriptions_updated_at BEFORE UPDATE ON public.prescriptions FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 CREATE TRIGGER set_reminders_updated_at BEFORE UPDATE ON public.medication_reminders FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 CREATE TRIGGER set_food_analyses_updated_at BEFORE UPDATE ON public.food_analyses FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+CREATE TRIGGER set_meal_logs_updated_at BEFORE UPDATE ON public.meal_logs FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+CREATE TRIGGER set_activity_logs_updated_at BEFORE UPDATE ON public.activity_logs FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();

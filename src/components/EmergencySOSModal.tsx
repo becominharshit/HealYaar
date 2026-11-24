@@ -1,18 +1,17 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
 import { AlertTriangle, PhoneCall, ShieldAlert, Heart, X, CheckCircle2 } from 'lucide-react';
+import { PortalModal } from './ui/PortalModal';
 
 export const EmergencySOSModal: React.FC = () => {
   const { isEmergencyModalOpen, closeEmergencyModal, t, highContrast } = useApp();
 
-  if (!isEmergencyModalOpen) return null;
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="emergency-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
+    <PortalModal
+      isOpen={isEmergencyModalOpen}
+      onClose={closeEmergencyModal}
+      ariaLabelledBy="emergency-modal-title"
+      backdropClassName="bg-black/80"
     >
       <div
         className={`w-full max-w-2xl rounded-3xl shadow-2xl p-6 sm:p-8 overflow-y-auto max-h-[90vh] ${
@@ -126,6 +125,7 @@ export const EmergencySOSModal: React.FC = () => {
         {/* Footer */}
         <div className="mt-6 flex justify-end">
           <button
+            type="button"
             onClick={closeEmergencyModal}
             className="px-6 py-3 rounded-2xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 font-bold text-slate-800 dark:text-slate-200 text-base transition-colors"
           >
@@ -133,6 +133,6 @@ export const EmergencySOSModal: React.FC = () => {
           </button>
         </div>
       </div>
-    </div>
+    </PortalModal>
   );
 };

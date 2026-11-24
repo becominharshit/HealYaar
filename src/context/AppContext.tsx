@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
   NavTab,
   SupportedLanguage,
@@ -17,16 +17,16 @@ import {
 } from '../services/authService';
 import { reminderService } from '../services/reminderService';
 import { periodService } from '../services/periodService';
-import { medicalReportService } from '../services/medicalReportService';
 import { userPreferencesService } from '../services/userPreferencesService';
-import { indexPeriodLog } from '../services/rag/ragVaultService';
+import { indexPeriodLog, deleteChunksBySource } from '../services/rag/ragVaultService';
 import {
   handleIncomingAuthCallback,
   getStoredAuthCallbackError,
   clearStoredAuthCallbackError
 } from '../services/authCallbackService';
-import { translations, Translations } from '../i18n/translations';
+import { getSafeTranslations, Translations } from '../i18n/translations';
 import { VoiceService, VoiceCommandMatch } from '../services/voiceService';
+import { teardownAllMediaAndBlobs } from '../utils/mediaSessionCleanup';
 
 export interface PermissionModalState {
   isOpen: boolean;
@@ -37,7 +37,7 @@ export interface PermissionModalState {
   onDenied: () => void;
 }
 
-const PROTECTED_TABS: NavTab[] = ['reports', 'medicines', 'period', 'reminders'];
+export const PUBLIC_TABS: NavTab[] = ['landing', 'login', 'privacy', 'terms', 'cookies', 'refund'];
 
 interface AppContextType {
   tab: NavTab;
@@ -100,6 +100,8 @@ interface AppContextType {
   // Period Tracker Cloud & Local Storage Management
   periodLogs: PeriodCycleEntry[];
   savePeriodLog: (entry: Omit<PeriodCycleEntry, 'id'>) => void;
+  updatePeriodLog: (entry: PeriodCycleEntry) => void;
+  deletePeriodLog: (id: string) => void;
   deletePeriodLogs: () => void;
 
   // Cart Management for Demo Pharmacy
@@ -117,12 +119,14 @@ interface AppContextType {
   currentUser: AuthUser | null;
   isAuthenticated: boolean;
   isAuthLoading: boolean;
+  sessionResetNonce: number;
   authCallbackError: { code: string; description: string } | null;
   clearAuthCallbackError: () => void;
   login: (credentials: LoginCredentials) => Promise<AuthResult>;
   loginWithGoogle: () => Promise<AuthResult>;
   signup: (credentials: SignUpCredentials) => Promise<AuthResult>;
-  logout: () => void;
+  logout: () => Promise<void>;
+  deleteAccountAndAllData: () => Promise<{ success: boolean; message: string }>;
   requestPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
   updatePassword: (password: string) => Promise<{ success: boolean; message: string }>;
 }
@@ -132,6 +136,10 @@ const AppContext = createContext<AppContextType | null>(null);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => authService.getStoredUser());
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+  const [sessionResetNonce, setSessionResetNonce] = useState<number>(0);
+  const isManualLogoutRef = useRef<boolean>(false);
+  const toastTimerRef = useRef<number | null>(null);
+
   const [authCallbackError, setAuthCallbackError] = useState<{ code: string; description: string } | null>(() => {
     return getStoredAuthCallbackError();
   });
@@ -147,7 +155,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ? 'authenticated'
     : 'unauthenticated';
 
-  const [tab, setTabState] = useState<NavTab>('home');
+  const [tab, setTabState] = useState<NavTab>('landing');
   const [intendedTab, setIntendedTab] = useState<NavTab | null>(null);
 
   const [language, setLanguage] = useState<SupportedLanguage>('en');
@@ -178,8 +186,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
       setToastMessage(null);
+      toastTimerRef.current = null;
     }, 4000);
   };
 
@@ -210,12 +222,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Demo Pharmacy Cart
   const [cart, setCart] = useState<{ item: MedicineCatalogItem; quantity: number }[]>([]);
 
-  // Central route guard: unauthenticated users cannot access any application tab
+  // Central route guard: unauthenticated users can ONLY visit public pages (landing, login, legal policies)
   const setTab = (targetTab: NavTab) => {
-    if (targetTab !== 'login' && !currentUser) {
+    if (!currentUser && !PUBLIC_TABS.includes(targetTab)) {
       setIntendedTab(targetTab);
       setTabState('login');
-      showToast('Please sign in to access HealYaar.');
+      showToast('Please sign in to access your private health workspace.');
+      return;
+    }
+    if (currentUser && targetTab === 'landing') {
+      setTabState('home');
       return;
     }
     setTabState(targetTab);
@@ -268,6 +284,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (!isMounted) return;
         if (user) {
           setCurrentUser(user);
+          setTabState((prev) => (prev === 'landing' || prev === 'login' ? 'home' : prev));
           // Preload cloud data in background
           const [cloudReminders, cloudCycles, cloudPrefs] = await Promise.all([
             reminderService.getReminders(user.id),
@@ -288,11 +305,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setCurrentUser(null);
           setReminders([]);
           setPeriodLogs([]);
+          setTabState((prev) => (PUBLIC_TABS.includes(prev) ? prev : 'landing'));
         }
       } catch (err) {
         console.warn('Initial session check notice:', err);
         if (isMounted) {
           setCurrentUser(null);
+          setTabState('landing');
         }
       } finally {
         if (isMounted) {
@@ -311,6 +330,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const user = await authService.getCurrentUser();
         if (user) {
           setCurrentUser(user);
+          setTabState((prev) => (prev === 'landing' || prev === 'login' ? 'home' : prev));
 
           // Fetch synchronized cloud data for this authenticated user
           try {
@@ -335,13 +355,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         }
       } else if (event === 'SIGNED_OUT') {
+        teardownAllMediaAndBlobs();
         setCurrentUser(null);
         setReminders([]);
         setPeriodLogs([]);
         setCart([]);
         setIntendedTab(null);
+        setSessionResetNonce((n) => n + 1);
         setTabState('login');
-        showToast('Your session has expired. Please sign in again.');
+        if (!isManualLogoutRef.current) {
+          showToast('Your session ended. Please sign in again.');
+        }
+        isManualLogoutRef.current = false;
       } else if (event === 'PASSWORD_RECOVERY') {
         // Direct user to reset password flow
         setTabState('login');
@@ -408,8 +433,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const openEmergencyModal = () => setIsEmergencyModalOpen(true);
   const closeEmergencyModal = () => setIsEmergencyModalOpen(false);
 
-  // Translation lookup helper (fall back to 'en' if regional language has no full translation dictionary)
-  const currentTranslation: Translations = translations[language as 'en' | 'hi' | 'mr'] || translations.en;
+  // Strict fallback translation resolver (never renders blank strings)
+  const currentTranslation: Translations = getSafeTranslations(language);
 
   const requestPermission = (
     type: 'mic' | 'location' | 'notifications' | 'report_ocr' | 'rx_ocr',
@@ -543,11 +568,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsAudioPlaying(false);
   };
 
-  // Reminder actions connected to Supabase and Local Fallback
+  // Reminder actions connected to Supabase and Local Fallback (optimistic update for instant UI sync)
   const addReminder = async (rem: Omit<ReminderItem, 'id' | 'createdDate'>) => {
-    const saved = await reminderService.addReminder(currentUser?.id || '', rem);
-    setReminders(prev => [saved, ...prev.filter(r => r.id !== saved.id)]);
+    const tempId = `rem-opt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const optimisticReminder: ReminderItem = {
+      id: tempId,
+      createdDate: new Date().toISOString().slice(0, 10),
+      ...rem
+    };
+    // Immediately reflect in UI so there is zero async lag
+    setReminders(prev => [optimisticReminder, ...prev]);
     showToast('Reminder saved successfully!');
+
+    const saved = await reminderService.addReminder(currentUser?.id || '', rem);
+    setReminders(prev => [saved, ...prev.filter(r => r.id !== tempId && r.id !== saved.id)]);
   };
 
   const toggleReminder = async (id: string) => {
@@ -564,11 +598,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Reminder deleted.');
   };
 
-  // Period logs actions connected to Supabase and Local Fallback
+  // Period logs actions connected to Supabase and Local Fallback (optimistic instant updates)
   const savePeriodLog = async (entry: Omit<PeriodCycleEntry, 'id'>) => {
+    const tempId = `log-opt-${Date.now()}`;
+    const optimisticEntry: PeriodCycleEntry = {
+      id: tempId,
+      ...entry
+    };
+    setPeriodLogs(prev => [optimisticEntry, ...prev]);
+    showToast(currentUser ? 'Cycle entry saved securely to your account.' : 'Cycle entry saved privately on this device.');
+
     const saved = await periodService.saveCycle(currentUser?.id || '', entry);
     if (saved) {
-      setPeriodLogs(prev => [saved, ...prev.filter(p => p.id !== saved.id)]);
+      setPeriodLogs(prev => [saved, ...prev.filter(p => p.id !== tempId && p.id !== saved.id)]);
       if (currentUser?.id) {
         indexPeriodLog(currentUser.id, {
           id: saved.id,
@@ -578,7 +620,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           notes: saved.notes
         }).catch(e => console.warn('RAG period indexing failed:', e));
       }
-      showToast(currentUser ? 'Cycle entry saved securely to your account.' : 'Cycle entry saved privately on this device.');
+    }
+  };
+
+  const updatePeriodLog = async (entry: PeriodCycleEntry) => {
+    setPeriodLogs(prev => prev.map(p => (p.id === entry.id ? entry : p)));
+    showToast('Cycle entry updated.');
+    const updated = await periodService.updateCycle(currentUser?.id || '', entry);
+    setPeriodLogs(prev => prev.map(p => (p.id === entry.id ? updated : p)));
+    if (currentUser?.id) {
+      indexPeriodLog(currentUser.id, {
+        id: updated.id,
+        date: updated.startDate,
+        flow: updated.flowIntensity,
+        symptoms: updated.symptoms,
+        notes: updated.notes
+      }).catch(e => console.warn('RAG period re-indexing failed:', e));
+    }
+  };
+
+  const deletePeriodLog = async (id: string) => {
+    setPeriodLogs(prev => prev.filter(p => p.id !== id));
+    showToast('Cycle entry deleted.');
+    await periodService.deleteCycle(currentUser?.id || '', id);
+    if (currentUser?.id) {
+      deleteChunksBySource(currentUser.id, id).catch(e => console.warn('RAG chunk delete warning:', e));
     }
   };
 
@@ -672,19 +738,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = async () => {
+    isManualLogoutRef.current = true;
     try {
       VoiceService.stopSpeaking();
       VoiceService.stopListening();
     } catch {}
+    teardownAllMediaAndBlobs();
+
     const uid = currentUser?.id;
-    await authService.logout(uid);
+
+    // Immediately clear all in-memory user state and redirect to Login
     setCurrentUser(null);
     setReminders([]);
     setPeriodLogs([]);
     setCart([]);
     setIntendedTab(null);
+    setIsListening(false);
+    setLiveTranscript('');
+    setIsAudioPlaying(false);
+    setSessionResetNonce((n) => n + 1);
     setTabState('login');
-    showToast('Signed out of HealYaar.');
+
+    try {
+      window.dispatchEvent(new CustomEvent('healyaar_session_reset'));
+    } catch {}
+
+    await authService.logout(uid);
+    showToast('Signed out safely. Your session has been cleared.');
+  };
+
+  const deleteAccountAndAllData = async () => {
+    if (!currentUser?.id) {
+      return { success: false, message: 'No active account session found.' };
+    }
+    isManualLogoutRef.current = true;
+    try {
+      VoiceService.stopSpeaking();
+      VoiceService.stopListening();
+    } catch {}
+
+    const result = await authService.deleteAccountAndAllData(currentUser.id);
+    setCurrentUser(null);
+    setReminders([]);
+    setPeriodLogs([]);
+    setCart([]);
+    setIntendedTab(null);
+    setSessionResetNonce((n) => n + 1);
+    setTabState('landing');
+    showToast(result.message);
+    return result;
   };
 
   const requestPasswordReset = async (email: string) => {
@@ -717,12 +819,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentUser,
         isAuthenticated: Boolean(currentUser),
         isAuthLoading,
+        sessionResetNonce,
         authCallbackError,
         clearAuthCallbackError,
         login,
         loginWithGoogle,
         signup,
         logout,
+        deleteAccountAndAllData,
         requestPasswordReset,
         updatePassword,
         isEmergencyModalOpen,
@@ -746,6 +850,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteReminder,
         periodLogs,
         savePeriodLog,
+        updatePeriodLog,
+        deletePeriodLog,
         deletePeriodLogs,
         cart,
         addToCart,

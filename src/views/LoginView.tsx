@@ -15,10 +15,15 @@ import {
   ShieldCheck,
   User,
   Loader2,
-  KeyRound,
   ArrowLeft,
-  Info
+  Info,
+  Trash2,
+  LogOut
 } from 'lucide-react';
+
+const DEMO_EMAIL = (import.meta as any).env?.VITE_DEMO_EMAIL || '';
+const DEMO_PASSWORD = (import.meta as any).env?.VITE_DEMO_PASSWORD || '';
+const HAS_ENV_DEMO = Boolean(DEMO_EMAIL && DEMO_PASSWORD);
 
 export const LoginView: React.FC = () => {
   const {
@@ -28,6 +33,7 @@ export const LoginView: React.FC = () => {
     loginWithGoogle,
     signup,
     logout,
+    deleteAccountAndAllData,
     requestPasswordReset,
     updatePassword,
     setTab,
@@ -37,13 +43,17 @@ export const LoginView: React.FC = () => {
 
   // Mode: 'login' | 'signup' | 'forgot_password' | 'reset_password'
   const [authMode, setAuthMode] = useState<'login' | 'signup' | 'forgot_password' | 'reset_password'>(() => {
-    // Check if recovery mode triggered by auth listener or URL hash
     if (
       sessionStorage.getItem('healyaar_auth_recovery_mode') === 'true' ||
       window.location.hash.includes('type=recovery')
     ) {
       sessionStorage.removeItem('healyaar_auth_recovery_mode');
       return 'reset_password';
+    }
+    const requested = sessionStorage.getItem('healyaar_initial_auth_mode');
+    if (requested === 'signup' || requested === 'login') {
+      sessionStorage.removeItem('healyaar_initial_auth_mode');
+      return requested;
     }
     return 'login';
   });
@@ -54,14 +64,18 @@ export const LoginView: React.FC = () => {
   const [password, setPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [rememberMe, setRememberMe] = useState<boolean>(true);
+  const [consentChecked, setConsentChecked] = useState<boolean>(false);
 
   // UI States
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState<boolean>(false);
+  const [isSigningOut, setIsSigningOut] = useState<boolean>(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<boolean>(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [errorField, setErrorField] = useState<'name' | 'email' | 'password' | 'confirmPassword' | 'general' | null>(null);
+  const [errorField, setErrorField] = useState<'name' | 'email' | 'password' | 'confirmPassword' | 'consent' | 'general' | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   // Input refs for accessible auto-focus
@@ -229,11 +243,16 @@ export const LoginView: React.FC = () => {
       return;
     }
 
-    // Confirm password check for signup
+    // Confirm password & required consent check for signup
     if (authMode === 'signup') {
       if (password !== confirmPassword) {
         setErrorMessage('Passwords do not match. Please re-enter.');
         setErrorField('confirmPassword');
+        return;
+      }
+      if (!consentChecked) {
+        setErrorMessage('Please confirm you agree to the Privacy Policy, Terms & Conditions, and educational medical notice before creating an account.');
+        setErrorField('consent');
         return;
       }
     }
@@ -265,10 +284,12 @@ export const LoginView: React.FC = () => {
         });
 
         if (result.success) {
+          if (result.user?.id) {
+            void authService.recordConsent(result.user.id, '2.0');
+          }
           if (result.user && !result.user.emailConfirmed) {
             setInfoMessage(
-              (result.message || 'Account created! Please check your email inbox to confirm your account before logging in.') +
-                ' (Note: Keep HealYaar running on port 5173 when clicking the verification link).'
+              result.message || 'Account created! Please check your email inbox to confirm your account before logging in.'
             );
             setAuthMode('login');
           } else {
@@ -289,27 +310,72 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  // If user is already authenticated and visits the login page
+  const handleDemoAccountLogin = async () => {
+    if (!HAS_ENV_DEMO || isSubmitting || isGoogleSubmitting) return;
+    setErrorMessage(null);
+    setErrorField(null);
+    setIsSubmitting(true);
+    try {
+      const result = await login({
+        email: DEMO_EMAIL,
+        password: DEMO_PASSWORD,
+        rememberMe: false
+      });
+      if (result.success) {
+        const destination = intendedTab || 'home';
+        setIntendedTab(null);
+        setTab(destination);
+      } else {
+        setErrorMessage(result.error || 'Demo login failed.');
+        setErrorField('general');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleExplicitSignOut = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
+    try {
+      await logout();
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
+
+  const handleDeleteAccountConfirm = async () => {
+    if (isDeletingAccount) return;
+    setIsDeletingAccount(true);
+    try {
+      await deleteAccountAndAllData();
+    } finally {
+      setIsDeletingAccount(false);
+      setConfirmDeleteOpen(false);
+    }
+  };
+
+  // If user is already authenticated and visits the Account Details / login page
   if (isAuthenticated && currentUser) {
     return (
-      <div className="max-w-xl mx-auto py-12 px-4 animate-fade-in">
+      <div className="max-w-xl mx-auto py-8 sm:py-12 px-4 animate-fade-in space-y-6">
         <div className="interactive-card bg-white dark:bg-slate-900 rounded-3xl p-8 sm:p-10 border border-slate-200/80 dark:border-slate-800 shadow-sm text-center space-y-6">
           {isSafeAvatarUrl(currentUser.avatarUrl) ? (
             <img
               src={currentUser.avatarUrl!}
-              alt={currentUser.name}
+              alt={`Profile photo of ${currentUser.name}`}
               referrerPolicy="no-referrer"
               className="w-16 h-16 mx-auto rounded-3xl object-cover border-2 border-teal-200 dark:border-teal-800 shadow-xs"
             />
           ) : (
             <div className="w-16 h-16 mx-auto rounded-3xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200/60 dark:border-teal-800/60 text-teal-600 dark:text-teal-400 flex items-center justify-center">
-              <CheckCircle2 className="w-8 h-8" />
+              <CheckCircle2 className="w-8 h-8" aria-hidden="true" />
             </div>
           )}
 
           <div className="space-y-2">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-xs font-bold border border-emerald-200/60 dark:border-emerald-800/60">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="w-2 h-2 rounded-full bg-emerald-500" aria-hidden="true" />
               <span>Signed In</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
@@ -322,6 +388,7 @@ export const LoginView: React.FC = () => {
 
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
             <button
+              type="button"
               onClick={() => {
                 const dest = intendedTab || 'home';
                 setIntendedTab(null);
@@ -330,16 +397,72 @@ export const LoginView: React.FC = () => {
               className="interactive-button w-full sm:w-auto px-6 py-3 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm shadow-xs flex items-center justify-center gap-2"
             >
               <span>{intendedTab ? `Continue to ${intendedTab}` : 'Go to Health Dashboard'}</span>
-              <ArrowRight className="w-4 h-4" />
+              <ArrowRight className="w-4 h-4" aria-hidden="true" />
             </button>
             <button
-              onClick={logout}
-              className="interactive-button w-full sm:w-auto px-6 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-sm transition-colors"
+              type="button"
+              onClick={handleExplicitSignOut}
+              disabled={isSigningOut}
+              className="interactive-button w-full sm:w-auto px-6 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
             >
-              <span>Sign Out</span>
+              <LogOut className="w-4 h-4" aria-hidden="true" />
+              <span>{isSigningOut ? 'Signing Out...' : 'Sign Out'}</span>
             </button>
           </div>
         </div>
+
+        {/* Danger Zone: Permanent Account & Health Data Deletion */}
+        <section
+          aria-labelledby="danger-zone-heading"
+          className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 border border-rose-200 dark:border-rose-900/60 shadow-sm space-y-4"
+        >
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex-shrink-0">
+              <Trash2 className="w-5 h-5" aria-hidden="true" />
+            </div>
+            <div className="space-y-1">
+              <h2 id="danger-zone-heading" className="text-base font-extrabold text-slate-900 dark:text-white">
+                Privacy Control &amp; Permanent Data Deletion
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Permanently erase your IndexedDB RAG Knowledge Vault, all cached browser storage, and every health record (reports, prescriptions, reminders, cycle logs, meals, and activity logs) stored in your account.
+              </p>
+            </div>
+          </div>
+
+          {!confirmDeleteOpen ? (
+            <button
+              type="button"
+              onClick={() => setConfirmDeleteOpen(true)}
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-950/80 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 font-bold text-xs transition-colors"
+            >
+              Delete My Account &amp; All Health Data
+            </button>
+          ) : (
+            <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 space-y-3">
+              <p className="text-xs font-bold text-rose-900 dark:text-rose-200">
+                This action cannot be undone. Are you sure you want to permanently delete all your health records and sign out?
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDeleteAccountConfirm}
+                  disabled={isDeletingAccount}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold disabled:opacity-60"
+                >
+                  {isDeletingAccount ? 'Deleting All Data...' : 'Yes, Permanently Delete Everything'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
       </div>
     );
   }
@@ -428,12 +551,23 @@ export const LoginView: React.FC = () => {
           aria-label="User Authentication Form"
           className="lg:col-span-7 p-6 sm:p-10 lg:p-12 flex flex-col justify-center bg-white dark:bg-slate-900"
         >
-          <div className="max-w-md w-full mx-auto space-y-6">
+          <div className="max-w-md w-full mx-auto space-y-5">
+            {/* Back to Landing Home link */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setTab('landing')}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Back to Home</span>
+              </button>
+            </div>
             
             {/* Friendly Notification if redirected from a protected route */}
             {intendedTab && (
               <div className="p-3.5 rounded-2xl bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800/60 text-teal-800 dark:text-teal-300 text-xs sm:text-sm flex items-start gap-2.5 animate-fade-in">
-                <Info className="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0 mt-0.5" />
+                <Info className="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
                 <div>
                   <p className="font-bold">Sign in required</p>
                   <p className="text-[11px] leading-relaxed opacity-90">
@@ -446,8 +580,8 @@ export const LoginView: React.FC = () => {
             {/* Form Header */}
             <div className="space-y-1 text-left">
               <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
-                {authMode === 'login' && 'Welcome to HealYaar'}
-                {authMode === 'signup' && 'Create your account'}
+                {authMode === 'login' && 'Log in to your Health Vault'}
+                {authMode === 'signup' && 'Create your free account'}
                 {authMode === 'forgot_password' && 'Reset your password'}
                 {authMode === 'reset_password' && 'Set a new password'}
               </h2>
@@ -604,11 +738,6 @@ export const LoginView: React.FC = () => {
                       } text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 transition-all focus:outline-none`}
                     />
                   </div>
-                  {errorField === 'email' && errorMessage && (
-                    <p className="text-xs text-rose-600 dark:text-rose-400 font-medium pl-1 animate-fade-in">
-                      {errorMessage}
-                    </p>
-                  )}
                 </div>
               )}
 
@@ -719,6 +848,7 @@ export const LoginView: React.FC = () => {
                     onClick={() => {
                       setAuthMode('forgot_password');
                       setErrorMessage(null);
+                      setErrorField(null);
                       setInfoMessage(null);
                     }}
                     className="font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 hover:underline transition-colors focus:outline-none focus:underline"
@@ -728,8 +858,54 @@ export const LoginView: React.FC = () => {
                 </div>
               )}
 
+              {/* Required Consent Checkbox (Unchecked by default in Sign Up mode) */}
+              {authMode === 'signup' && (
+                <div
+                  className={`p-3.5 rounded-2xl border text-xs leading-relaxed ${
+                    errorField === 'consent'
+                      ? 'bg-rose-50/80 dark:bg-rose-950/40 border-rose-400 dark:border-rose-700'
+                      : 'bg-slate-50/80 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <label htmlFor="signup-consent-checkbox" className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="signup-consent-checkbox"
+                      type="checkbox"
+                      checked={consentChecked}
+                      onChange={(e) => {
+                        setConsentChecked(e.target.checked);
+                        if (errorField === 'consent') {
+                          setErrorMessage(null);
+                          setErrorField(null);
+                        }
+                      }}
+                      className="mt-0.5 w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-teal-600 focus:ring-teal-500 cursor-pointer flex-shrink-0"
+                    />
+                    <span className="text-slate-700 dark:text-slate-300">
+                      I agree to the{' '}
+                      <button
+                        type="button"
+                        onClick={() => setTab('privacy')}
+                        className="font-bold text-teal-700 dark:text-teal-400 underline"
+                      >
+                        Privacy Policy
+                      </button>
+                      ,{' '}
+                      <button
+                        type="button"
+                        onClick={() => setTab('terms')}
+                        className="font-bold text-teal-700 dark:text-teal-400 underline"
+                      >
+                        Terms &amp; Conditions
+                      </button>
+                      , and understand HealYaar is an educational AI tool, not a licensed doctor.
+                    </span>
+                  </label>
+                </div>
+              )}
+
               {/* Submit Button */}
-              <div className="pt-2">
+              <div className="pt-2 space-y-2.5">
                 <button
                   type="submit"
                   disabled={isSubmitting || isGoogleSubmitting}
@@ -737,7 +913,7 @@ export const LoginView: React.FC = () => {
                 >
                   {isSubmitting ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <Loader2 className="w-4 h-4 animate-spin text-white" aria-hidden="true" />
                       <span>
                         {authMode === 'login'
                           ? 'Signing in...'
@@ -759,10 +935,21 @@ export const LoginView: React.FC = () => {
                           ? 'Update Password'
                           : 'Request Password Reset'}
                       </span>
-                      <ArrowRight className="w-4 h-4" />
+                      <ArrowRight className="w-4 h-4" aria-hidden="true" />
                     </>
                   )}
                 </button>
+
+                {authMode === 'login' && HAS_ENV_DEMO && (
+                  <button
+                    type="button"
+                    onClick={handleDemoAccountLogin}
+                    disabled={isSubmitting || isGoogleSubmitting}
+                    className="w-full py-2.5 px-4 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition-colors"
+                  >
+                    Try Demo Account
+                  </button>
+                )}
               </div>
             </form>
 
@@ -776,6 +963,7 @@ export const LoginView: React.FC = () => {
                     onClick={() => {
                       setAuthMode('signup');
                       setErrorMessage(null);
+                      setErrorField(null);
                       setInfoMessage(null);
                     }}
                     className="font-bold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 hover:underline transition-colors"
@@ -793,6 +981,7 @@ export const LoginView: React.FC = () => {
                     onClick={() => {
                       setAuthMode('login');
                       setErrorMessage(null);
+                      setErrorField(null);
                       setInfoMessage(null);
                     }}
                     className="font-bold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 hover:underline transition-colors"
@@ -810,6 +999,7 @@ export const LoginView: React.FC = () => {
                     onClick={() => {
                       setAuthMode('login');
                       setErrorMessage(null);
+                      setErrorField(null);
                       setInfoMessage(null);
                     }}
                     className="font-bold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 hover:underline transition-colors inline-flex items-center gap-1"

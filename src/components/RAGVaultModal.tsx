@@ -27,6 +27,7 @@ import { medicalReportService } from '../services/medicalReportService';
 import { prescriptionService } from '../services/prescriptionService';
 import { periodService } from '../services/periodService';
 import { MEDICAL_KNOWLEDGE_BASE } from '../data/medicalKnowledgeBase';
+import { PortalModal } from './ui/PortalModal';
 
 interface RAGVaultModalProps {
   isOpen: boolean;
@@ -47,6 +48,7 @@ export const RAGVaultModal: React.FC<RAGVaultModalProps> = ({ isOpen, onClose, u
   const [chunks, setChunks] = useState<RAGChunk[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [selectedChunk, setSelectedChunk] = useState<RAGChunk | null>(null);
 
@@ -144,14 +146,13 @@ export const RAGVaultModal: React.FC<RAGVaultModalProps> = ({ isOpen, onClose, u
     await loadVaultData();
   };
 
-  const handleClearVault = async () => {
+  const handleConfirmClearVault = async () => {
     if (!userId) return;
-    if (window.confirm('Are you sure you want to clear your local RAG Vault? Your raw reports and prescriptions remain safe, but RAG index will be reset.')) {
-      await clearUserVault(userId);
-      setSelectedChunk(null);
-      await loadVaultData();
-      setStatusMessage({ text: 'Vault index cleared.', type: 'success' });
-    }
+    await clearUserVault(userId);
+    setSelectedChunk(null);
+    setConfirmClearOpen(false);
+    await loadVaultData();
+    setStatusMessage({ text: 'Vault index cleared.', type: 'success' });
   };
 
   if (!isOpen) return null;
@@ -213,16 +214,20 @@ export const RAGVaultModal: React.FC<RAGVaultModalProps> = ({ isOpen, onClose, u
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+    <PortalModal
+      isOpen={isOpen}
+      onClose={onClose}
+      ariaLabelledBy="rag-vault-modal-title"
+    >
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shadow-sm">
-              <Database className="w-5 h-5" />
+              <Database className="w-5 h-5" aria-hidden="true" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+              <h2 id="rag-vault-modal-title" className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
                 Health Knowledge Vault (RAG)
                 <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-semibold">
                   Dual-Layer
@@ -234,10 +239,12 @@ export const RAGVaultModal: React.FC<RAGVaultModalProps> = ({ isOpen, onClose, u
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close Health Knowledge Vault modal"
             className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -334,16 +341,43 @@ export const RAGVaultModal: React.FC<RAGVaultModalProps> = ({ isOpen, onClose, u
                   <span>{isSyncing ? 'Syncing...' : 'Sync Vault'}</span>
                 </button>
                 <button
-                  onClick={handleClearVault}
+                  type="button"
+                  onClick={() => setConfirmClearOpen(true)}
                   className="p-1.5 rounded-lg border border-rose-200 dark:border-rose-900/40 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
                   title="Clear RAG Vault index"
+                  aria-label="Clear RAG Vault index"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
               </>
             )}
           </div>
         </div>
+
+        {/* Inline Clear Confirmation (avoids window.confirm) */}
+        {confirmClearOpen && (
+          <div className="px-6 py-3 bg-rose-50 dark:bg-rose-950/50 border-b border-rose-200 dark:border-rose-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+            <span className="text-rose-800 dark:text-rose-200 font-semibold">
+              Clear your local RAG Vault index? Your saved reports & prescriptions stay safe and can be re-synced anytime.
+            </span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setConfirmClearOpen(false)}
+                className="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClearVault}
+                className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold"
+              >
+                Clear Index
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-3">
@@ -445,6 +479,7 @@ export const RAGVaultModal: React.FC<RAGVaultModalProps> = ({ isOpen, onClose, u
         <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between text-xs text-slate-500">
           <span>RAG Isolation Mode: User-Scoped IndexedDB (100% Client-Side Privacy)</span>
           <button
+            type="button"
             onClick={onClose}
             className="px-4 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-white font-medium hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors"
           >
@@ -452,6 +487,6 @@ export const RAGVaultModal: React.FC<RAGVaultModalProps> = ({ isOpen, onClose, u
           </button>
         </div>
       </div>
-    </div>
+    </PortalModal>
   );
 };

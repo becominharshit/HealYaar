@@ -45,6 +45,7 @@ export interface VoiceIntent {
 }
 
 export const TAB_LABELS: Record<NavTab, string> = {
+  landing: 'Landing page',
   home: 'Home page',
   assistant: 'AI Assistant',
   symptoms: 'Symptom Guidance',
@@ -58,7 +59,9 @@ export const TAB_LABELS: Record<NavTab, string> = {
   reminders: 'Reminders',
   login: 'Login & Authentication',
   privacy: 'Privacy Policy',
-  terms: 'Terms of Service'
+  terms: 'Terms of Service',
+  cookies: 'Cookies Policy',
+  refund: 'Refund & Free-Access Policy'
 };
 
 /**

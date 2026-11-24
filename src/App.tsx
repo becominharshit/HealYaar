@@ -5,11 +5,13 @@ import { Navbar } from './components/Navbar';
 import { EmergencySOSModal } from './components/EmergencySOSModal';
 import { PermissionModal } from './components/PermissionModal';
 import { VoiceAssistantBanner } from './components/VoiceAssistantBanner';
+import { CookieConsentBanner } from './components/CookieConsentBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FloatingBackground, FloatingTheme } from './components/FloatingBackground';
 import { NavTab } from './types';
 
 // Views
+import { LandingView } from './views/LandingView';
 import { HomeView } from './views/HomeView';
 import { AssistantView } from './views/AssistantView';
 import { SymptomGuidanceView } from './views/SymptomGuidanceView';
@@ -22,14 +24,19 @@ import { MentalWellbeingView } from './views/MentalWellbeingView';
 import { PeriodTrackerView } from './views/PeriodTrackerView';
 import { RemindersView } from './views/RemindersView';
 import { LoginView } from './views/LoginView';
+import { PrivacyPolicyView } from './views/PrivacyPolicyView';
+import { TermsOfServiceView } from './views/TermsOfServiceView';
+import { CookiesPolicyView } from './views/CookiesPolicyView';
+import { RefundPolicyView } from './views/RefundPolicyView';
 import { EmailVerificationPrompt } from './components/EmailVerificationPrompt';
 import { AuthCallbackRecovery } from './components/AuthCallbackRecovery';
 
-import { ShieldCheck, Heart, AlertOctagon, PhoneCall, Sparkles, Loader2 } from 'lucide-react';
+import { Heart, AlertOctagon, Sparkles, Loader2 } from 'lucide-react';
 
-const PROTECTED_TABS: NavTab[] = ['reports', 'medicines', 'period', 'reminders'];
+const EMAIL_VERIFICATION_PROTECTED_TABS: NavTab[] = ['reports', 'medicines', 'period', 'reminders'];
 
 const TAB_THEME_MAP: Record<NavTab, FloatingTheme> = {
+  landing: 'home',
   home: 'home',
   assistant: 'assistant',
   symptoms: 'symptoms',
@@ -43,7 +50,9 @@ const TAB_THEME_MAP: Record<NavTab, FloatingTheme> = {
   reminders: 'reminders',
   login: 'login',
   privacy: 'home',
-  terms: 'home'
+  terms: 'home',
+  cookies: 'home',
+  refund: 'home'
 };
 
 const MainLayout: React.FC = () => {
@@ -52,9 +61,9 @@ const MainLayout: React.FC = () => {
     setTab,
     toastMessage,
     openEmergencyModal,
-    t,
     currentUser,
     isAuthLoading,
+    sessionResetNonce,
     logout,
     authCallbackError,
     clearAuthCallbackError
@@ -66,9 +75,9 @@ const MainLayout: React.FC = () => {
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-6">
         <div className="flex flex-col items-center justify-center text-center space-y-4 max-w-sm">
           <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-teal-600 to-emerald-400 text-white flex items-center justify-center font-black shadow-lg shadow-teal-500/20 animate-pulse">
-            <Heart className="w-8 h-8 fill-white/20" />
+            <Heart className="w-8 h-8 fill-white/20" aria-hidden="true" />
           </div>
-          <Loader2 className="w-7 h-7 text-teal-600 dark:text-teal-400 animate-spin" />
+          <Loader2 className="w-7 h-7 text-teal-600 dark:text-teal-400 animate-spin" aria-hidden="true" />
           <h2 className="text-lg font-black text-slate-900 dark:text-white">
             Verifying HealYaar Session...
           </h2>
@@ -80,42 +89,118 @@ const MainLayout: React.FC = () => {
     );
   }
 
-  // 2. Mandatory Authentication Gate:
-  // Unauthenticated users CANNOT access any feature or navigation in the application
+  // 2. Strict Authentication Gate (Public entry = LandingView + Login + 4 Public Legal Policies ONLY)
   if (!currentUser) {
-    return (
-      <div className="min-h-screen flex flex-col bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200 relative">
-        <FloatingBackground theme="login" />
-        <main id="main-content" className="flex-1 flex flex-col justify-center px-4 sm:px-6 lg:px-8 py-8 relative z-10">
-          <ErrorBoundary onNavigateHome={() => setTab('login')}>
-            {authCallbackError ? (
-              <AuthCallbackRecovery
-                errorCode={authCallbackError.code}
-                errorDescription={authCallbackError.description}
-                onClearError={clearAuthCallbackError}
-              />
-            ) : (
+    const renderPublicView = () => {
+      if (authCallbackError) {
+        return (
+          <main id="main-content" className="flex-1 flex flex-col justify-center px-4 sm:px-6 lg:px-8 py-8 relative z-10">
+            <AuthCallbackRecovery
+              errorCode={authCallbackError.code}
+              errorDescription={authCallbackError.description}
+              onClearError={clearAuthCallbackError}
+            />
+          </main>
+        );
+      }
+
+      if (tab === 'privacy') {
+        return (
+          <main id="main-content" className="flex-1 relative z-10">
+            <PrivacyPolicyView />
+          </main>
+        );
+      }
+      if (tab === 'terms') {
+        return (
+          <main id="main-content" className="flex-1 relative z-10">
+            <TermsOfServiceView />
+          </main>
+        );
+      }
+      if (tab === 'cookies') {
+        return (
+          <main id="main-content" className="flex-1 relative z-10">
+            <CookiesPolicyView />
+          </main>
+        );
+      }
+      if (tab === 'refund') {
+        return (
+          <main id="main-content" className="flex-1 relative z-10">
+            <RefundPolicyView />
+          </main>
+        );
+      }
+      if (tab === 'login') {
+        return (
+          <div className="min-h-screen flex flex-col bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200 relative">
+            <FloatingBackground theme="login" />
+            <main id="main-content" className="flex-1 flex flex-col justify-center px-4 sm:px-6 lg:px-8 py-8 relative z-10">
               <LoginView />
-            )}
-          </ErrorBoundary>
-        </main>
-        <footer className="border-t border-slate-200/60 dark:border-slate-800/60 py-6 px-4 text-center text-xs text-slate-400 dark:text-slate-500 relative z-10">
-          <p>© {new Date().getFullYear()} HealYaar • Accessible AI Health Companion. Row-level encrypted & verified.</p>
-        </footer>
+            </main>
+            <footer className="border-t border-slate-200/60 dark:border-slate-800/60 py-6 px-4 text-center text-xs text-slate-500 dark:text-slate-400 relative z-10 space-y-2">
+              <div className="flex flex-wrap items-center justify-center gap-4 font-semibold">
+                <button type="button" onClick={() => setTab('landing')} className="hover:text-teal-700 dark:hover:text-teal-400 hover:underline">
+                  Home
+                </button>
+                <button type="button" onClick={() => setTab('privacy')} className="hover:text-teal-700 dark:hover:text-teal-400 hover:underline">
+                  Privacy Policy
+                </button>
+                <button type="button" onClick={() => setTab('terms')} className="hover:text-teal-700 dark:hover:text-teal-400 hover:underline">
+                  Terms &amp; Conditions
+                </button>
+                <button type="button" onClick={() => setTab('cookies')} className="hover:text-teal-700 dark:hover:text-teal-400 hover:underline">
+                  Cookies Policy
+                </button>
+                <button type="button" onClick={() => setTab('refund')} className="hover:text-teal-700 dark:hover:text-teal-400 hover:underline">
+                  Refund &amp; Free-Access
+                </button>
+              </div>
+              <p>© {new Date().getFullYear()} HealYaar • Accessible AI Health Companion. Row-level encrypted &amp; verified.</p>
+            </footer>
+          </div>
+        );
+      }
+
+      // Default unauthenticated landing experience
+      return <LandingView />;
+    };
+
+    return (
+      <div className="min-h-screen flex flex-col bg-[#fbfbfa] dark:bg-[#090d16] text-slate-900 dark:text-slate-100">
+        <ErrorBoundary onNavigateHome={() => setTab('landing')}>
+          {renderPublicView()}
+        </ErrorBoundary>
+
+        {toastMessage && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="fixed bottom-6 right-6 z-50 p-3.5 sm:p-4 rounded-2xl bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-md text-white shadow-xl border border-slate-700/80 text-xs sm:text-sm font-semibold flex items-center gap-2.5 animate-fade-in max-w-md"
+          >
+            <Sparkles className="w-4 h-4 text-teal-400 flex-shrink-0" aria-hidden="true" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
+
+        <EmergencySOSModal />
+        <CookieConsentBanner />
       </div>
     );
   }
 
+  // 3. Authenticated Application Views
   const renderActiveView = () => {
-    const isProtected = PROTECTED_TABS.includes(tab);
+    const requiresVerifiedEmail = EMAIL_VERIFICATION_PROTECTED_TABS.includes(tab);
 
-    // Email verification requirement before accessing private health data (vaults, reports, cycle, prescriptions)
-    if (isProtected && currentUser && !currentUser.emailConfirmed) {
+    if (requiresVerifiedEmail && currentUser && !currentUser.emailConfirmed) {
       return <EmailVerificationPrompt user={currentUser} onSignOut={logout} />;
     }
 
     switch (tab) {
       case 'home':
+      case 'landing':
         return <HomeView />;
       case 'assistant':
         return <AssistantView />;
@@ -139,6 +224,14 @@ const MainLayout: React.FC = () => {
         return <RemindersView />;
       case 'login':
         return <LoginView />;
+      case 'privacy':
+        return <PrivacyPolicyView />;
+      case 'terms':
+        return <TermsOfServiceView />;
+      case 'cookies':
+        return <CookiesPolicyView />;
+      case 'refund':
+        return <RefundPolicyView />;
       default:
         return <HomeView />;
     }
@@ -165,48 +258,64 @@ const MainLayout: React.FC = () => {
           className="md:left-20 lg:left-64 xl:left-72"
         />
 
-        {/* Main Content View Container */}
-        <main id="main-content" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8 pb-12 relative z-10">
-          <ErrorBoundary key={tab} onNavigateHome={() => setTab('home')}>
+        {/* Main Content View Container (pb-28 ensures floating Voice Assistant never covers controls) */}
+        <main id="main-content" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8 pb-28 relative z-10">
+          <ErrorBoundary key={`${tab}-${sessionResetNonce}`} onNavigateHome={() => setTab('home')}>
             {renderActiveView()}
           </ErrorBoundary>
         </main>
 
-        {/* Accessible Footer with Translucent Glass */}
-        <footer className="mt-auto border-t border-white/60 dark:border-slate-800/60 glass-card-subtle backdrop-blur-xl py-8 px-4 sm:px-6 lg:px-8 text-slate-500 dark:text-slate-400 text-xs sm:text-sm relative z-10">
-          <div className="max-w-7xl mx-auto space-y-6">
+        {/* Accessible Footer with Legal Links */}
+        <footer className="mt-auto border-t border-white/60 dark:border-slate-800/60 glass-card-subtle backdrop-blur-xl py-8 pb-24 sm:pb-12 px-4 sm:px-6 lg:px-8 text-slate-600 dark:text-slate-400 text-xs sm:text-sm relative z-10">
+          <div className="max-w-7xl mx-auto space-y-5">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-teal-600 to-emerald-400 text-white flex items-center justify-center font-black shadow-xs flex-shrink-0">
-                  <Heart className="w-5 h-5 fill-white/20" />
+                  <Heart className="w-5 h-5 fill-white/20" aria-hidden="true" />
                 </div>
                 <div>
                   <span className="text-lg font-black tracking-tight text-slate-900 dark:text-white">
                     Heal<span className="text-teal-600 dark:text-teal-400">Yaar</span>
                   </span>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     Accessible AI Health Companion • Verified Plain-Language Guidance
                   </p>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-3">
+                <nav aria-label="Legal policy links" className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  <button type="button" onClick={() => setTab('privacy')} className="hover:text-teal-700 dark:hover:text-teal-400 hover:underline">
+                    Privacy
+                  </button>
+                  <button type="button" onClick={() => setTab('terms')} className="hover:text-teal-700 dark:hover:text-teal-400 hover:underline">
+                    Terms
+                  </button>
+                  <button type="button" onClick={() => setTab('cookies')} className="hover:text-teal-700 dark:hover:text-teal-400 hover:underline">
+                    Cookies
+                  </button>
+                  <button type="button" onClick={() => setTab('refund')} className="hover:text-teal-700 dark:hover:text-teal-400 hover:underline">
+                    Refund Policy
+                  </button>
+                </nav>
+
                 <button
+                  type="button"
                   onClick={openEmergencyModal}
                   className="interactive-button px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-950/60 border border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs"
                 >
-                  <AlertOctagon className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                  <AlertOctagon className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" aria-hidden="true" />
                   <span>Emergency SOS (112 / 108)</span>
                 </button>
               </div>
             </div>
 
-            <div className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed border-t border-slate-100 dark:border-slate-800/60 pt-4 space-y-1.5">
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed border-t border-slate-200/70 dark:border-slate-800/60 pt-4 space-y-1.5">
               <p>
-                <strong>Important Medical Disclaimer:</strong> HealYaar is an educational and communication support platform designed to explain medical terms, test reports, and health concepts in simple, plain language. It does not provide medical diagnosis, write prescriptions, recommend stopping or changing treatments, or replace the care of a licensed healthcare professional. All doctor listings, lab reports, and medicine catalogues are synthetic examples for demonstration.
+                <strong>Important Medical Disclaimer:</strong> HealYaar is an educational and communication support platform designed to explain medical terms, test reports, and health concepts in simple, plain language. It does not provide medical diagnosis, write prescriptions, recommend stopping or changing treatments, or replace the care of a licensed healthcare professional.
               </p>
               <p>
-                <strong>Privacy Guarantee:</strong> Health records, menstrual cycle entries, and medicine reminders entered into HealYaar remain strictly on your local browser. No personal health records are sold or transferred to third parties.
+                <strong>Privacy Guarantee:</strong> Health records, menstrual cycle entries, and medicine reminders are isolated strictly to your authenticated account with PostgreSQL Row-Level Security and user-scoped IndexedDB vaults.
               </p>
             </div>
           </div>
@@ -218,16 +327,17 @@ const MainLayout: React.FC = () => {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-6 right-6 z-50 p-3.5 sm:p-4 rounded-2xl bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-md text-white shadow-xl border border-slate-700/80 text-xs sm:text-sm font-semibold flex items-center gap-2.5 animate-fade-in max-w-md"
+          className="fixed bottom-20 right-4 sm:right-6 z-50 p-3.5 sm:p-4 rounded-2xl bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-md text-white shadow-xl border border-slate-700/80 text-xs sm:text-sm font-semibold flex items-center gap-2.5 animate-fade-in max-w-md"
         >
-          <Sparkles className="w-4 h-4 text-teal-400 flex-shrink-0" />
+          <Sparkles className="w-4 h-4 text-teal-400 flex-shrink-0" aria-hidden="true" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Modals & Voice Banner */}
+      {/* Modals, Cookie Banner & Floating Voice Banner */}
       <EmergencySOSModal />
       <PermissionModal />
+      <CookieConsentBanner />
       <VoiceAssistantBanner />
     </div>
   );

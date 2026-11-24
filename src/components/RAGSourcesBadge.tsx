@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Database, ShieldCheck, ChevronDown, ChevronUp, FileText, Pill, Calendar, Apple, BookOpen } from 'lucide-react';
 import { RAGRetrievedSource } from '../types/rag';
+import { filterRAGStopWords } from '../utils/healthFormatters';
 
 interface RAGSourcesBadgeProps {
   sources: RAGRetrievedSource[];
@@ -111,20 +112,24 @@ export const RAGSourcesBadge: React.FC<RAGSourcesBadgeProps> = ({ sources, class
                         </div>
                       </div>
 
-                      {/* Keywords pills */}
-                      {src.matchedKeywords && src.matchedKeywords.length > 0 && (
-                        <div className="flex items-center gap-1 mt-1 flex-wrap">
-                          <span className="text-[10px] text-slate-400">Matched:</span>
-                          {src.matchedKeywords.slice(0, 4).map((kw, idx) => (
-                            <span
-                              key={idx}
-                              className="px-1.5 py-0.2 rounded text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
-                            >
-                              {kw}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      {/* Keywords pills (stop-words filtered) */}
+                      {(() => {
+                        const cleanKeywords = filterRAGStopWords(src.matchedKeywords || []);
+                        if (cleanKeywords.length === 0) return null;
+                        return (
+                          <div className="flex items-center gap-1 mt-1 flex-wrap">
+                            <span className="text-[10px] text-slate-400">Matched:</span>
+                            {cleanKeywords.slice(0, 5).map((kw, idx) => (
+                              <span
+                                key={idx}
+                                className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium"
+                              >
+                                {kw}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
 
                       {/* Expanded chunk content */}
                       {isItemExpanded && (
@@ -176,19 +181,23 @@ export const RAGSourcesBadge: React.FC<RAGSourcesBadgeProps> = ({ sources, class
                         </div>
                       </div>
 
-                      {src.matchedKeywords && src.matchedKeywords.length > 0 && (
-                        <div className="flex items-center gap-1 mt-1 flex-wrap">
-                          <span className="text-[10px] text-slate-400">Matched:</span>
-                          {src.matchedKeywords.slice(0, 4).map((kw, idx) => (
-                            <span
-                              key={idx}
-                              className="px-1.5 py-0.2 rounded text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
-                            >
-                              {kw}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      {(() => {
+                        const cleanKeywords = filterRAGStopWords(src.matchedKeywords || []);
+                        if (cleanKeywords.length === 0) return null;
+                        return (
+                          <div className="flex items-center gap-1 mt-1 flex-wrap">
+                            <span className="text-[10px] text-slate-400">Matched:</span>
+                            {cleanKeywords.slice(0, 5).map((kw, idx) => (
+                              <span
+                                key={idx}
+                                className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium"
+                              >
+                                {kw}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
 
                       {isItemExpanded && (
                         <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed bg-slate-50 dark:bg-slate-950 p-2 rounded">

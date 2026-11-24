@@ -108,78 +108,79 @@ export const HomeView: React.FC = () => {
     {
       id: 'assistant',
       title: t.nav.assistant,
-      description: 'Ask symptoms or health questions in simple words.',
-      icon: <MessageSquareHeart className="w-7 h-7 text-teal-600 dark:text-teal-400" />,
+      description: t.home.cardAssistantDesc,
+      icon: <MessageSquareHeart className="w-7 h-7 text-teal-600 dark:text-teal-400" aria-hidden="true" />,
       color: 'border-teal-200/60 dark:border-teal-800/60 bg-teal-50/40 dark:bg-teal-950/30 hover:border-teal-400',
-      badge: 'Voice Ready'
+      badge: 'Dual-Layer RAG'
     },
     {
       id: 'symptoms',
       title: t.nav.symptoms,
-      description: 'Check discomfort, urgency levels, and self-care steps.',
-      icon: <Activity className="w-7 h-7 text-blue-600 dark:text-blue-400" />,
+      description: t.home.cardSymptomsDesc,
+      icon: <Activity className="w-7 h-7 text-blue-600 dark:text-blue-400" aria-hidden="true" />,
       color: 'border-blue-200/60 dark:border-blue-800/60 bg-blue-50/40 dark:bg-blue-950/30 hover:border-blue-400'
     },
     {
       id: 'reports',
       title: t.nav.reports,
-      description: 'Upload lab tests to translate values into plain language.',
-      icon: <FileSpreadsheet className="w-7 h-7 text-purple-600 dark:text-purple-400" />,
+      description: t.home.cardReportsDesc,
+      icon: <FileSpreadsheet className="w-7 h-7 text-purple-600 dark:text-purple-400" aria-hidden="true" />,
       color: 'border-purple-200/60 dark:border-purple-800/60 bg-purple-50/40 dark:bg-purple-950/30 hover:border-purple-400',
       badge: 'Secure OCR'
     },
     {
       id: 'medicines',
       title: t.nav.medicines,
-      description: 'Scan slips, check dosages, and create dose reminders.',
-      icon: <Pill className="w-7 h-7 text-rose-600 dark:text-rose-400" />,
+      description: t.home.cardMedicinesDesc,
+      icon: <Pill className="w-7 h-7 text-rose-600 dark:text-rose-400" aria-hidden="true" />,
       color: 'border-rose-200/60 dark:border-rose-800/60 bg-rose-50/40 dark:bg-rose-950/30 hover:border-rose-400',
       badge: 'Rx Reader'
     },
     {
       id: 'doctors',
       title: t.nav.doctors,
-      description: 'Find verified regional clinics with GPS distance calculation.',
-      icon: <Stethoscope className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />,
+      description: t.home.cardDoctorsDesc,
+      icon: <Stethoscope className="w-7 h-7 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />,
       color: 'border-emerald-200/60 dark:border-emerald-800/60 bg-emerald-50/40 dark:bg-emerald-950/30 hover:border-emerald-400',
       badge: '10km Strict'
     },
     {
       id: 'nutrition',
       title: t.nav.nutrition,
-      description: 'Photo estimation and Indian recipe nutrient calculator.',
-      icon: <UtensilsCrossed className="w-7 h-7 text-amber-600 dark:text-amber-400" />,
+      description: t.home.cardNutritionDesc,
+      icon: <UtensilsCrossed className="w-7 h-7 text-amber-600 dark:text-amber-400" aria-hidden="true" />,
       color: 'border-amber-200/60 dark:border-amber-800/60 bg-amber-50/40 dark:bg-amber-950/30 hover:border-amber-400'
     },
     {
       id: 'period',
       title: t.nav.period,
-      description: 'Private, on-device cycle logging and phase predictions.',
-      icon: <CalendarHeart className="w-7 h-7 text-pink-600 dark:text-pink-400" />,
+      description: t.home.cardPeriodDesc,
+      icon: <CalendarHeart className="w-7 h-7 text-pink-600 dark:text-pink-400" aria-hidden="true" />,
       color: 'border-pink-200/60 dark:border-pink-800/60 bg-pink-50/40 dark:bg-pink-950/30 hover:border-pink-400',
-      badge: '🌸 Private'
+      badge: 'Private'
     },
     {
       id: 'reminders',
       title: t.nav.reminders,
-      description: 'Manage daily medication schedules and clinic visits.',
-      icon: <BellRing className="w-7 h-7 text-orange-600 dark:text-orange-400" />,
+      description: t.home.cardRemindersDesc,
+      icon: <BellRing className="w-7 h-7 text-orange-600 dark:text-orange-400" aria-hidden="true" />,
       color: 'border-orange-200/60 dark:border-orange-800/60 bg-orange-50/40 dark:bg-orange-950/30 hover:border-orange-400',
       badge: 'Alarms'
     },
     {
       id: 'mental',
       title: t.nav.mental,
-      description: 'Breathing exercises, calm grounding, and crisis support.',
-      icon: <Brain className="w-7 h-7 text-cyan-600 dark:text-cyan-400" />,
+      description: t.home.cardMentalDesc,
+      icon: <Brain className="w-7 h-7 text-cyan-600 dark:text-cyan-400" aria-hidden="true" />,
       color: 'border-cyan-200/60 dark:border-cyan-800/60 bg-cyan-50/40 dark:bg-cyan-950/30 hover:border-cyan-400'
     },
     {
       id: 'fitness',
       title: t.nav.fitness,
-      description: 'Gentle mobility routines and evidence ratings for supplements.',
-      icon: <Dumbbell className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />,
-      color: 'border-indigo-200/60 dark:border-indigo-800/60 bg-indigo-50/40 dark:bg-indigo-950/30 hover:border-indigo-400'
+      description: t.home.cardFitnessDesc,
+      icon: <Dumbbell className="w-7 h-7 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />,
+      color: 'border-indigo-200/60 dark:border-indigo-800/60 bg-indigo-50/40 dark:bg-indigo-950/30 hover:border-indigo-400',
+      badge: 'Daily Log'
     }
   ];
 
@@ -257,23 +258,28 @@ export const HomeView: React.FC = () => {
     <div className="space-y-10 animate-fade-in pb-16 overflow-x-clip relative">
       {/* 1. WELCOME & TRUST BANNER */}
       <section className="relative z-10 rounded-2xl glass-card-hero bg-gradient-to-r from-teal-900/75 via-teal-950/80 to-slate-900/80 text-white p-4 sm:p-5 shadow-sm border border-teal-500/30 dark:border-teal-400/20 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs sm:text-sm">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 rounded-xl bg-teal-500/30 border border-teal-400/40 text-teal-200 flex items-center justify-center flex-shrink-0">
-            <Sparkles className="w-5 h-5 text-yellow-300" />
+            <Sparkles className="w-5 h-5 text-yellow-300" aria-hidden="true" />
           </div>
-          <div>
-            <h1 className="text-base sm:text-lg font-extrabold text-white flex items-center gap-2">
-              <span>Clear & Calm Health Companion</span>
-              <span className="hidden sm:inline px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-200 text-[10px] font-semibold border border-teal-400/30">
+          <div className="min-w-0">
+            <h1 className="text-base sm:text-lg font-extrabold text-white flex flex-wrap items-center gap-2">
+              <span className="break-words">
+                {currentUser?.name ? `${t.home.welcomeHeading} — ${currentUser.name}` : t.home.welcomeHeading}
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-200 text-[10px] font-semibold border border-teal-400/30 whitespace-nowrap">
                 Encrypted Vault
               </span>
             </h1>
+            <p className="text-xs text-teal-100/90 mt-0.5 leading-snug">
+              {t.home.welcomeSubheading}
+            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5 text-[11px] text-teal-200/90 bg-teal-950/60 px-3 py-1.5 rounded-xl border border-teal-700/50 self-start md:self-auto flex-shrink-0 backdrop-blur-xs">
-          <Info className="w-3.5 h-3.5 text-teal-300 flex-shrink-0" />
-          <span>Informational only • Not diagnosis</span>
+          <Info className="w-3.5 h-3.5 text-teal-300 flex-shrink-0" aria-hidden="true" />
+          <span>{t.disclaimerBadge}</span>
         </div>
       </section>
 
@@ -428,25 +434,29 @@ export const HomeView: React.FC = () => {
           </div>
         </div>
 
-        {/* Input area */}
+        {/* Input area — flex layout ensures placeholder never clips under voice controls in A++ mode */}
         <form onSubmit={handleSymptomSubmit} className="space-y-3">
-          <div className="relative">
+          <label htmlFor="home-symptom-input" className="sr-only">
+            {t.home.searchPlaceholder}
+          </label>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 rounded-2xl border-2 border-slate-200/80 dark:border-slate-700/80 bg-white/90 dark:bg-slate-900/90 focus-within:border-teal-500 p-1.5 shadow-xs">
             <input
+              id="home-symptom-input"
               type="text"
               value={quickProblemInput}
               onChange={(e) => setQuickProblemInput(e.target.value)}
-              placeholder="Describe what you're feeling... (e.g. 'Headache since yesterday with mild fever')"
-              className="glass-input w-full px-5 py-3.5 pr-24 rounded-2xl border-2 border-slate-200/80 dark:border-slate-700/80 text-slate-900 dark:text-slate-100 text-sm sm:text-base font-medium placeholder-slate-400 focus:outline-none focus:border-teal-500 shadow-xs"
+              placeholder={t.home.searchPlaceholder}
+              className="flex-1 min-w-0 px-3.5 py-2.5 bg-transparent text-slate-900 dark:text-slate-100 text-sm sm:text-base font-medium placeholder-slate-400 focus:outline-none"
             />
 
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 z-4">
+            <div className="flex items-center justify-end gap-1.5 px-1.5 flex-shrink-0">
               {quickProblemInput && (
                 <button
                   type="button"
                   onClick={() => setQuickProblemInput('')}
-                  className="px-2 py-1 text-xs text-slate-400 hover:text-slate-600 font-semibold"
+                  className="px-2.5 py-1.5 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-semibold"
                 >
-                  Clear
+                  {t.actions.clear}
                 </button>
               )}
 
@@ -454,7 +464,7 @@ export const HomeView: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleToggleSymptomVoice}
-                  className={`p-2 rounded-xl transition-all shadow-xs ${
+                  className={`p-2.5 rounded-xl transition-all shadow-xs ${
                     isSymptomVoiceActive || isListening
                       ? 'bg-red-600 text-white animate-pulse'
                       : 'bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800'
@@ -462,9 +472,9 @@ export const HomeView: React.FC = () => {
                   aria-label="Speak symptoms"
                 >
                   {isSymptomVoiceActive || isListening ? (
-                    <MicOff className="w-4 h-4" />
+                    <MicOff className="w-4 h-4" aria-hidden="true" />
                   ) : (
-                    <Mic className="w-4 h-4" />
+                    <Mic className="w-4 h-4" aria-hidden="true" />
                   )}
                 </button>
               </Tooltip>
@@ -510,7 +520,7 @@ export const HomeView: React.FC = () => {
       {/* 4. HEALTH TOOLS GRID */}
       <section className="space-y-4 relative z-2">
         <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-          Health & Self-Care Tools
+          {t.home.sectionToolsTitle}
         </h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
@@ -609,8 +619,12 @@ export const HomeView: React.FC = () => {
 
         {/* Question Input */}
         <div className="space-y-2">
-          <div className="relative">
+          <label htmlFor="home-assistant-input" className="sr-only">
+            {t.home.searchPlaceholder}
+          </label>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 rounded-2xl border-2 border-teal-200/80 dark:border-teal-800/80 bg-white/95 dark:bg-slate-900/95 focus-within:border-teal-500 p-1.5 shadow-sm">
             <input
+              id="home-assistant-input"
               type="text"
               value={homeAssistantQuery}
               onChange={(e) => setHomeAssistantQuery(e.target.value)}
@@ -620,11 +634,11 @@ export const HomeView: React.FC = () => {
                   handleHomeAssistantAsk(homeAssistantQuery);
                 }
               }}
-              placeholder="Ask a question... (e.g. 'What does fasting blood sugar 114 mg/dL mean?')"
-              className="glass-input w-full px-5 py-3 pr-28 rounded-2xl border-2 border-teal-200/80 dark:border-teal-800/80 text-slate-900 dark:text-slate-100 text-sm placeholder-slate-400 focus:outline-none focus:border-teal-500 shadow-sm"
+              placeholder={t.home.searchPlaceholder}
+              className="flex-1 min-w-0 px-3.5 py-2 bg-transparent text-slate-900 dark:text-slate-100 text-sm placeholder-slate-400 focus:outline-none"
             />
 
-            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 z-4">
+            <div className="flex items-center justify-end gap-1.5 px-1 flex-shrink-0">
               <Tooltip content={isAssistantVoiceActive ? 'Stop listening' : 'Speak question'} position="top">
                 <button
                   type="button"
@@ -637,9 +651,9 @@ export const HomeView: React.FC = () => {
                   aria-label="Speak health question"
                 >
                   {isAssistantVoiceActive || isListening ? (
-                    <MicOff className="w-4 h-4" />
+                    <MicOff className="w-4 h-4" aria-hidden="true" />
                   ) : (
-                    <Mic className="w-4 h-4" />
+                    <Mic className="w-4 h-4" aria-hidden="true" />
                   )}
                 </button>
               </Tooltip>
@@ -648,10 +662,10 @@ export const HomeView: React.FC = () => {
                 type="button"
                 onClick={() => handleHomeAssistantAsk(homeAssistantQuery)}
                 disabled={!homeAssistantQuery.trim()}
-                className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-extrabold rounded-xl text-xs flex items-center gap-1"
+                className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-extrabold rounded-xl text-xs flex items-center gap-1 whitespace-nowrap"
               >
-                <span>Ask</span>
-                <Send className="w-3 h-3" />
+                <span>{t.home.askButton}</span>
+                <Send className="w-3 h-3" aria-hidden="true" />
               </button>
             </div>
           </div>

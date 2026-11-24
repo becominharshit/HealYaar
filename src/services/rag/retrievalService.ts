@@ -3,6 +3,8 @@ import { MEDICAL_KNOWLEDGE_BASE } from '../../data/medicalKnowledgeBase';
 import { getUserChunks } from './ragVaultService';
 import { computeDenseLocalEmbedding, cosineSimilarity, computeBM25Score } from './embeddingService';
 
+export type { RAGChunk, RAGRetrievedSource, RAGRetrievalResult };
+
 export interface RetrievalOptions {
   maxPersonal?: number;
   maxClinical?: number;

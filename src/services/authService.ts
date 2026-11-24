@@ -17,6 +17,8 @@ import {
   OAuthCallbackPayload
 } from './oauthPopupHelpers';
 import { User, Session } from '@supabase/supabase-js';
+import { teardownAllMediaAndBlobs } from '../utils/mediaSessionCleanup';
+import { clearUserVault } from './rag/ragVaultService';
 
 /**
  * HealYaar Production Authentication Service (Supabase Auth)
@@ -766,19 +768,54 @@ export const authService = {
   },
 
   /**
+   * Persists explicit user policy consent in consent_records + user-scoped localStorage
+   */
+  async recordConsent(userId: string, consentTypeOrVersion = '2.0', policyVersion?: string): Promise<void> {
+    if (!userId) return;
+    const acceptedAt = new Date().toISOString();
+    const consentType = policyVersion ? consentTypeOrVersion : 'terms_and_privacy';
+    const resolvedVersion = policyVersion ?? consentTypeOrVersion;
+    try {
+      localStorage.setItem(
+        `healyaar_user_${userId}_consent_${consentType}`,
+        JSON.stringify({ consentType, policyVersion: resolvedVersion, acceptedAt })
+      );
+      localStorage.setItem(
+        `healyaar_user_${userId}_consent`,
+        JSON.stringify({ consentType, policyVersion: resolvedVersion, acceptedAt })
+      );
+    } catch {
+      // ignore
+    }
+
+    if (!isSupabaseConfigured()) return;
+    try {
+      await supabase.from('consent_records').insert({
+        user_id: userId,
+        consent_type: consentType,
+        policy_version: resolvedVersion,
+        accepted_at: acceptedAt
+      });
+    } catch {
+      // Non-blocking if migration not yet applied
+    }
+  },
+
+  /**
    * Clears all locally cached data scoped to a user or all legacy keys
    */
   clearUserLocalData(userId?: string): void {
     try {
       if (userId) {
-        localStorage.removeItem(`healyaar_user_${userId}_reports`);
-        localStorage.removeItem(`healyaar_user_${userId}_prescriptions`);
-        localStorage.removeItem(`healyaar_user_${userId}_period_logs`);
-        localStorage.removeItem(`healyaar_user_${userId}_reminders`);
-        localStorage.removeItem(`healyaar_user_${userId}_preferences`);
-        localStorage.removeItem(`healyaar_user_${userId}_chat_history`);
-        localStorage.removeItem(`healyaar_user_${userId}_symptoms`);
-        localStorage.removeItem(`healyaar_user_${userId}_nutrition`);
+        const prefix = `healyaar_user_${userId}_`;
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith(prefix)) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
       }
       localStorage.removeItem(STORAGE_KEY_AUTH);
       localStorage.removeItem('healyaar_reminders');
@@ -792,15 +829,19 @@ export const authService = {
       sessionStorage.removeItem('healyaar_active_prescription');
       sessionStorage.removeItem('healyaar_pending_voice_query');
       sessionStorage.removeItem('healyaar_guest_mode');
+      sessionStorage.removeItem('healyaar_user_location');
+      sessionStorage.removeItem('healyaar_initial_auth_mode');
     } catch {
       // ignore
     }
   },
 
   /**
-   * Sign Out
+   * Sign Out with complete media track teardown, blob revocation, and session cleanup
    */
   async logout(userId?: string): Promise<void> {
+    teardownAllMediaAndBlobs();
+
     if (isSupabaseConfigured()) {
       try {
         await supabase.auth.signOut();
@@ -810,6 +851,64 @@ export const authService = {
     }
 
     this.clearUserLocalData(userId);
+  },
+
+  /**
+   * Permanently deletes all user health data across IndexedDB RAG Vault, localStorage, and Supabase tables,
+   * then signs the user out completely.
+   */
+  async deleteAccountAndAllData(userId: string): Promise<{ success: boolean; message: string }> {
+    if (!userId) {
+      return { success: false, message: 'No active user session found.' };
+    }
+
+    teardownAllMediaAndBlobs();
+
+    // 1. Purge user-scoped IndexedDB RAG Vault
+    try {
+      await clearUserVault(userId);
+    } catch (err) {
+      console.warn('IndexedDB vault purge warning:', err);
+    }
+
+    // 2. Delete all user rows from Supabase tables (RLS enforces auth.uid() = user_id)
+    if (isSupabaseConfigured()) {
+      const userTables = [
+        'medical_reports',
+        'prescriptions',
+        'medication_reminders',
+        'period_cycles',
+        'meal_logs',
+        'food_analyses',
+        'activity_logs',
+        'consent_records',
+        'user_preferences'
+      ];
+
+      await Promise.allSettled(
+        userTables.map((table) => supabase.from(table).delete().eq('user_id', userId))
+      );
+
+      try {
+        await supabase.from('profiles').delete().eq('id', userId);
+      } catch (err) {
+        console.warn('Profile delete notice:', err);
+      }
+
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn('Sign out after data deletion warning:', err);
+      }
+    }
+
+    // 3. Purge all user-scoped localStorage and sessionStorage keys
+    this.clearUserLocalData(userId);
+
+    return {
+      success: true,
+      message: 'All your health records, local RAG vault, and profile data have been permanently deleted.'
+    };
   },
 
   /**

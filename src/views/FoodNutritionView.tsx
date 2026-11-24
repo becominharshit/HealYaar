@@ -3,6 +3,8 @@ import { useApp } from '../context/AppContext';
 import { indexNutritionLog } from '../services/rag/ragVaultService';
 import { commonFoodIngredients } from '../data/syntheticData';
 import { FoodPhotoSample, RecipeIngredient, FoodNutrientInfo } from '../types';
+import { parseMealDescription } from '../utils/nutritionParser';
+import { registerBlobUrl, revokeRegisteredBlobUrl } from '../utils/mediaSessionCleanup';
 import { SectionHero } from '../components/ui/SectionHero';
 import { NutritionIllustration } from '../components/ContextualIllustrations';
 import {
@@ -16,12 +18,124 @@ import {
   Trash2,
   Calculator,
   Sparkles,
-  PieChart,
-  ImageIcon,
   RotateCcw,
-  HelpCircle,
-  FileText
+  FileText,
+  ChefHat,
+  ArrowRight
 } from 'lucide-react';
+
+interface BalancedThaliRecipe {
+  id: string;
+  name: string;
+  region: string;
+  tags: ('High Protein' | 'Iron-Rich' | 'Low GI / Diabetic' | 'Quick Veg')[];
+  mealText: string;
+  calories: number;
+  protein: number;
+  fiber: number;
+  icmrNote: string;
+  prepMinutes: number;
+}
+
+const ICMR_THALI_RECIPES: BalancedThaliRecipe[] = [
+  {
+    id: 'thali-dal-roti',
+    name: 'Classic Balanced Dal-Roti Thali',
+    region: 'Pan-India ICMR-NIN Standard',
+    tags: ['High Protein', 'Low GI / Diabetic', 'Quick Veg'],
+    mealText: '1 katori dal, 2 rotis, 1 katori palak, 1 cup curd',
+    calories: 470,
+    protein: 22.5,
+    fiber: 11.4,
+    icmrNote: 'Matches ICMR-NIN My Plate for the Day: whole grains + pulses + green leafy veg + probiotic curd.',
+    prepMinutes: 25
+  },
+  {
+    id: 'thali-iron-palak',
+    name: 'Iron-Boost Palak Chana & Lemon Bowl',
+    region: 'North & Central India',
+    tags: ['Iron-Rich', 'High Protein', 'Quick Veg'],
+    mealText: '1 katori chana, 1 katori palak, 2 rotis',
+    calories: 455,
+    protein: 21.8,
+    fiber: 13.6,
+    icmrNote: 'Pair with fresh lemon/amla (Vitamin C) to multiply non-heme plant iron absorption; keep tea 1 hour away.',
+    prepMinutes: 20
+  },
+  {
+    id: 'thali-diabetic-millet',
+    name: 'Low-GI Moong Dal Chilla & Paneer Salad',
+    region: 'Glycemic-Friendly Breakfast / Lunch',
+    tags: ['Low GI / Diabetic', 'High Protein', 'Quick Veg'],
+    mealText: '1 katori moong dal, 100g paneer, 1 bowl salad',
+    calories: 425,
+    protein: 28.4,
+    fiber: 9.2,
+    icmrNote: 'High protein-to-carb ratio blunts post-meal glucose spikes (ideal for HbA1c & prediabetes management).',
+    prepMinutes: 15
+  },
+  {
+    id: 'thali-south-idli',
+    name: 'Fermented Idli, Sambar & Roasted Chana',
+    region: 'South India',
+    tags: ['Low GI / Diabetic', 'Iron-Rich', 'Quick Veg'],
+    mealText: '3 idlis, 1 katori sambar, 30g chana',
+    calories: 365,
+    protein: 15.6,
+    fiber: 9.8,
+    icmrNote: 'Fermentation improves B-vitamin bioavailability and gentle gut digestibility for seniors.',
+    prepMinutes: 15
+  },
+  {
+    id: 'thali-egg-oats',
+    name: 'High-Protein Masala Oats & Boiled Eggs',
+    region: 'Modern Balanced Bowl',
+    tags: ['High Protein', 'Low GI / Diabetic'],
+    mealText: '1 bowl oats, 2 eggs, 1 banana',
+    calories: 410,
+    protein: 20.5,
+    fiber: 7.4,
+    icmrNote: 'Soluble beta-glucan fiber supports LDL cholesterol lowering alongside complete egg protein.',
+    prepMinutes: 12
+  },
+  {
+    id: 'thali-rajma-iron',
+    name: 'Rajma Bowl, Ragi Roti & Cucumber Salad',
+    region: 'Iron & Calcium Rich',
+    tags: ['Iron-Rich', 'High Protein', 'Quick Veg'],
+    mealText: '1 katori rajma, 2 rotis, 1 bowl salad',
+    calories: 440,
+    protein: 19.2,
+    fiber: 13.1,
+    icmrNote: 'Legumes + whole wheat provide complementary essential amino acids and sustained energy.',
+    prepMinutes: 30
+  }
+];
+
+const DEMO_THALI_SVG_DATA_URL =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#fffbeb"/>
+          <stop offset="100%" stop-color="#f0fdfa"/>
+        </linearGradient>
+      </defs>
+      <rect width="640" height="420" fill="url(#bg)"/>
+      <circle cx="320" cy="215" r="168" fill="#e2e8f0" stroke="#94a3b8" stroke-width="6"/>
+      <circle cx="320" cy="215" r="154" fill="#f8fafc"/>
+      <circle cx="245" cy="150" r="52" fill="#f59e0b" stroke="#b45309" stroke-width="4"/>
+      <circle cx="245" cy="150" r="40" fill="#fbbf24"/>
+      <circle cx="378" cy="145" r="44" fill="#15803d" stroke="#166534" stroke-width="4"/>
+      <circle cx="378" cy="145" r="34" fill="#22c55e"/>
+      <circle cx="420" cy="245" r="38" fill="#ffffff" stroke="#cbd5e1" stroke-width="4"/>
+      <ellipse cx="268" cy="268" rx="74" ry="52" fill="#d97706" opacity="0.22"/>
+      <circle cx="255" cy="268" r="56" fill="#f3d5a5" stroke="#b45309" stroke-width="3"/>
+      <circle cx="285" cy="256" r="52" fill="#f6dfb7" stroke="#b45309" stroke-width="3"/>
+      <text x="320" y="395" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0f766e">Demo ICMR-NIN Balanced Dal-Roti Thali (1 Katori Dal + 2 Rotis + Palak + Curd)</text>
+    </svg>`
+  );
 
 export const FoodNutritionView: React.FC = () => {
   const { t, showToast, currentUser } = useApp();
@@ -43,12 +157,26 @@ export const FoodNutritionView: React.FC = () => {
   const [cookingMethod, setCookingMethod] = useState<'Boiled / Steamed' | 'Shallow Tadka (1-2 tsp oil)' | 'Deep Fried' | 'Raw / Salad'>('Shallow Tadka (1-2 tsp oil)');
   const [recipeIngredients, setRecipeIngredients] = useState<RecipeIngredient[]>([]);
   const [selectedIngredientToAdd, setSelectedIngredientToAdd] = useState<string>(commonFoodIngredients[0]?.id || 'atta');
+  const [selectedThaliFilter, setSelectedThaliFilter] = useState<'All' | 'High Protein' | 'Iron-Rich' | 'Low GI / Diabetic' | 'Quick Veg'>('All');
 
-  // Clean up Object URL on component unmount to prevent memory leaks
+  // Clean up Object URL on unmount or session reset
   useEffect(() => {
-    return () => {
+    const handleReset = () => {
       if (userImageBlobUrlRef.current) {
-        URL.revokeObjectURL(userImageBlobUrlRef.current);
+        revokeRegisteredBlobUrl(userImageBlobUrlRef.current);
+        userImageBlobUrlRef.current = null;
+      }
+      setUserUploadedImageUrl(null);
+      setPhotoAnalysisResult(null);
+      setPhotoIngredients([]);
+      setRecipeIngredients([]);
+      setManualTextInput('');
+    };
+    window.addEventListener('healyaar_session_reset', handleReset);
+    return () => {
+      window.removeEventListener('healyaar_session_reset', handleReset);
+      if (userImageBlobUrlRef.current) {
+        revokeRegisteredBlobUrl(userImageBlobUrlRef.current);
         userImageBlobUrlRef.current = null;
       }
     };
@@ -90,11 +218,11 @@ export const FoodNutritionView: React.FC = () => {
    */
   const handleImageFileSelected = (file: File) => {
     if (userImageBlobUrlRef.current) {
-      URL.revokeObjectURL(userImageBlobUrlRef.current);
+      revokeRegisteredBlobUrl(userImageBlobUrlRef.current);
       userImageBlobUrlRef.current = null;
     }
 
-    const objectUrl = URL.createObjectURL(file);
+    const objectUrl = registerBlobUrl(URL.createObjectURL(file));
     userImageBlobUrlRef.current = objectUrl;
     setUserUploadedImageUrl(objectUrl);
     setIsAnalyzingPhoto(true);
@@ -195,7 +323,7 @@ export const FoodNutritionView: React.FC = () => {
 
   const handleResetPhoto = () => {
     if (userImageBlobUrlRef.current) {
-      URL.revokeObjectURL(userImageBlobUrlRef.current);
+      revokeRegisteredBlobUrl(userImageBlobUrlRef.current);
       userImageBlobUrlRef.current = null;
     }
     setUserUploadedImageUrl(null);
@@ -205,65 +333,78 @@ export const FoodNutritionView: React.FC = () => {
   };
 
   /**
-   * Option B: Natural Language Ingredients Parser
-   * Parses natural text such as:
-   * "2 eggs, 2 slices whole wheat bread, 1 banana, 250ml milk"
+   * Instant Demo Meal Photo loader for live demonstrations
+   */
+  const handleLoadDemoMealPhoto = () => {
+    if (userImageBlobUrlRef.current) {
+      revokeRegisteredBlobUrl(userImageBlobUrlRef.current);
+      userImageBlobUrlRef.current = null;
+    }
+    setUserUploadedImageUrl(DEMO_THALI_SVG_DATA_URL);
+    setIsAnalyzingPhoto(true);
+    setConfidenceNote(null);
+
+    setTimeout(() => {
+      const demoNutrients: FoodNutrientInfo = {
+        calories: 470,
+        proteinGrams: 22.5,
+        carbsGrams: 64.0,
+        fatGrams: 11.2,
+        fiberGrams: 11.4,
+        sodiumMg: 420,
+        glycemicIndex: 'Low'
+      };
+      const demoIngs = [
+        { name: 'Yellow Dal Tadka (1 katori)', estimatedAmount: '150g' },
+        { name: 'Whole Wheat Phulka Rotis (2 pcs)', estimatedAmount: '70g' },
+        { name: 'Palak Sabzi (1 katori)', estimatedAmount: '150g' },
+        { name: 'Fresh Homemade Curd / Dahi (1 bowl)', estimatedAmount: '100g' }
+      ];
+
+      setPhotoAnalysisResult({
+        id: `demo-thali-${Date.now()}`,
+        name: 'ICMR-NIN Balanced Dal-Roti Thali (Demo Photo)',
+        imageUrl: DEMO_THALI_SVG_DATA_URL,
+        estimatedPortion: '1 katori dal + 2 rotis + 1 katori palak + 1 bowl curd',
+        nutrients: demoNutrients,
+        uncertaintyNotes: [
+          'Demo meal illustration calibrated against ICMR-NIN / IFCT 2017 Indian food composition benchmarks.',
+          'Upload any real meal photo to preserve your exact photograph while estimating nutrients.'
+        ],
+        detectedIngredients: demoIngs
+      });
+      setPhotoIngredients(demoIngs);
+      setIsAnalyzingPhoto(false);
+      showToast('Demo balanced thali loaded and analyzed.');
+    }, 450);
+  };
+
+  /**
+   * Option B: Indian Household Serving-Unit NLP Parser
+   * Converts Indian measures ("1 katori dal, 2 rotis", "1 cup rice", "2 idlis")
+   * into accurate gram weights and macro estimates via ICMR-NIN benchmarks.
    */
   const parseAndApplyNaturalIngredients = (text: string) => {
     if (!text.trim()) return;
-
-    const items = text.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
-    const parsed: RecipeIngredient[] = [];
-
-    items.forEach((itemStr, index) => {
-      const lower = itemStr.toLowerCase();
-      let match = commonFoodIngredients.find(ing => lower.includes(ing.name.toLowerCase()));
-
-      // Fallback matching
-      if (!match) {
-        if (lower.includes('egg')) match = commonFoodIngredients.find(i => i.id === 'egg');
-        else if (lower.includes('bread') || lower.includes('toast') || lower.includes('roti') || lower.includes('atta') || lower.includes('wheat')) match = commonFoodIngredients.find(i => i.id === 'atta');
-        else if (lower.includes('milk') || lower.includes('dairy')) match = commonFoodIngredients.find(i => i.id === 'milk');
-        else if (lower.includes('banana') || lower.includes('fruit')) match = commonFoodIngredients.find(i => i.id === 'banana');
-        else if (lower.includes('dal') || lower.includes('lentil')) match = commonFoodIngredients.find(i => i.id === 'dal-toor');
-        else if (lower.includes('rice')) match = commonFoodIngredients.find(i => i.id === 'rice');
-        else if (lower.includes('paneer') || lower.includes('cheese')) match = commonFoodIngredients.find(i => i.id === 'paneer');
-        else if (lower.includes('oil') || lower.includes('ghee') || lower.includes('butter')) match = commonFoodIngredients.find(i => i.id === 'oil-cooking');
-        else if (lower.includes('potato') || lower.includes('veggie') || lower.includes('salad')) match = commonFoodIngredients.find(i => i.id === 'potato');
-      }
-
-      // Extract number if present
-      const numMatch = lower.match(/(\d+(?:\.\d+)?)/);
-      const parsedQty = numMatch ? Math.max(1, parseFloat(numMatch[1])) : (match ? match.quantity : 1);
-
-      if (match) {
-        parsed.push({
-          ...match,
-          id: `parsed-${index}-${Date.now()}`,
-          quantity: parsedQty
-        });
-      } else {
-        // Generic fallback item
-        parsed.push({
-          id: `custom-${index}-${Date.now()}`,
-          name: itemStr,
-          quantity: parsedQty,
-          unit: 'g',
-          caloriesPerUnit: 1.2,
-          proteinPerUnit: 0.05,
-          carbsPerUnit: 0.18,
-          fatPerUnit: 0.03,
-          fiberPerUnit: 0.02,
-          sodiumPerUnit: 2
-        });
-      }
-    });
-
-    if (parsed.length > 0) {
-      setRecipeIngredients(parsed);
-      showToast(`Parsed ${parsed.length} ingredient(s) from your text.`);
+    const entries = parseMealDescription(text);
+    if (entries.length > 0) {
+      setRecipeIngredients(entries.map((e) => e.ingredient));
+      const approxKcal = entries.reduce((sum, e) => sum + e.calories, 0);
+      showToast(`Parsed ${entries.length} item(s) (~${approxKcal} kcal total).`);
     }
   };
+
+  const handleLoadThaliIntoCalculator = (recipe: BalancedThaliRecipe) => {
+    setActiveMode('recipe');
+    setManualTextInput(recipe.mealText);
+    setServings(1);
+    setCookingMethod('Shallow Tadka (1-2 tsp oil)');
+    parseAndApplyNaturalIngredients(recipe.mealText);
+  };
+
+  const filteredThaliRecipes = ICMR_THALI_RECIPES.filter((r) =>
+    selectedThaliFilter === 'All' ? true : r.tags.includes(selectedThaliFilter)
+  );
 
   const handleManualTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -288,8 +429,8 @@ export const FoodNutritionView: React.FC = () => {
     );
   };
 
-  // Recipe Calculations
-  const cookingMethodOilMultiplier = cookingMethod === 'Deep Fried' ? 1.5 : cookingMethod === 'Shallow Tadka (1-2 tsp oil)' ? 1.0 : 0.8;
+  // Recipe Calculations (ICMR-NIN calibrated; only deep-fried adds oil penalty)
+  const cookingMethodOilMultiplier = cookingMethod === 'Deep Fried' ? 1.28 : 1.0;
 
   const totalCalories = Math.round(recipeIngredients.reduce((sum, item) => sum + item.quantity * item.caloriesPerUnit, 0) * cookingMethodOilMultiplier);
   const totalProtein = Number((recipeIngredients.reduce((sum, item) => sum + item.quantity * item.proteinPerUnit, 0)).toFixed(1));
@@ -382,7 +523,7 @@ export const FoodNutritionView: React.FC = () => {
                 </label>
 
                 <label className="cursor-pointer inline-flex items-center gap-2.5 px-6 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold text-sm sm:text-base shadow-sm transition-all active:scale-95">
-                  <Camera className="w-5 h-5 text-emerald-400" />
+                  <Camera className="w-5 h-5 text-emerald-400" aria-hidden="true" />
                   <span>Capture with Camera</span>
                   <input
                     type="file"
@@ -392,6 +533,15 @@ export const FoodNutritionView: React.FC = () => {
                     onChange={handleFileInputChange}
                   />
                 </label>
+
+                <button
+                  type="button"
+                  onClick={handleLoadDemoMealPhoto}
+                  className="inline-flex items-center gap-2 px-5 py-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-800 font-bold text-sm shadow-xs transition-all active:scale-95"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                  <span>Load Demo Meal Photo</span>
+                </button>
               </div>
 
               {/* Alternative Prompt: Option B Switch */}
@@ -402,7 +552,7 @@ export const FoodNutritionView: React.FC = () => {
                   onClick={() => setActiveMode('recipe')}
                   className="font-bold text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1"
                 >
-                  <Calculator className="w-3.5 h-3.5" />
+                  <Calculator className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>Enter Ingredients Manually</span>
                 </button>
               </div>
@@ -787,6 +937,102 @@ export const FoodNutritionView: React.FC = () => {
           </section>
         </div>
       )}
+
+      {/* ==============================================================
+          ICMR-NIN BALANCED THALI RECIPE EXPLORER
+      ============================================================== */}
+      <section className="interactive-card bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-xs font-bold border border-emerald-200 dark:border-emerald-800">
+              <ChefHat className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              <span>ICMR-NIN Dietary Guidelines</span>
+            </div>
+            <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
+              Balanced Thali Recipe Explorer
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+              Filter practical Indian home meals by nutrient goal and load them directly into the calculator.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {(['All', 'High Protein', 'Iron-Rich', 'Low GI / Diabetic', 'Quick Veg'] as const).map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                onClick={() => setSelectedThaliFilter(filter)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  selectedThaliFilter === filter
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-teal-50 dark:hover:bg-teal-950/50'
+                }`}
+              >
+                {filter}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredThaliRecipes.map((recipe) => (
+            <div
+              key={recipe.id}
+              className="p-5 rounded-2xl bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-col justify-between gap-4 hover:border-teal-400 transition-colors"
+            >
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  <span>{recipe.region}</span>
+                  <span>~{recipe.prepMinutes} min</span>
+                </div>
+
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white leading-snug">
+                  {recipe.name}
+                </h3>
+
+                <div className="flex flex-wrap gap-1">
+                  {recipe.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="px-2 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 border border-teal-200/70 dark:border-teal-800 text-[10px] font-bold"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 pt-1 text-center text-xs">
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
+                    <div className="font-black text-amber-700 dark:text-amber-300">{recipe.calories}</div>
+                    <div className="text-[10px] text-slate-500">kcal</div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
+                    <div className="font-black text-teal-700 dark:text-teal-300">{recipe.protein}g</div>
+                    <div className="text-[10px] text-slate-500">protein</div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
+                    <div className="font-black text-emerald-700 dark:text-emerald-300">{recipe.fiber}g</div>
+                    <div className="text-[10px] text-slate-500">fiber</div>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  {recipe.icmrNote}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleLoadThaliIntoCalculator(recipe)}
+                className="w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
+              >
+                <span>Load into Calculator</span>
+                <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 };

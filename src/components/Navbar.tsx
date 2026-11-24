@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { NavTab, SupportedLanguage } from '../types';
-import { regionalOptions } from '../i18n/translations';
+import { languageOptions } from '../i18n/translations';
 import { VOICE_LONG_PRESS_MS } from '../context/VoiceAssistantContext';
 import { Tooltip } from './ui/Tooltip';
 import { isSafeAvatarUrl } from '../services/oauthPopupHelpers';
@@ -258,11 +258,14 @@ export const Navbar: React.FC = () => {
                 </div>
               </div>
               <button
-                onClick={logout}
+                type="button"
+                onClick={() => {
+                  void logout();
+                }}
                 className="w-full py-1.5 px-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
                 title="Sign out of your HealYaar account"
               >
-                <LogOut className="w-3.5 h-3.5" />
+                <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Sign Out</span>
               </button>
             </div>
@@ -392,63 +395,43 @@ export const Navbar: React.FC = () => {
             {/* Language Selector Dropdown */}
             <div className="relative">
               <button
+                type="button"
                 onClick={() => setLangDropdownOpen((prev) => !prev)}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 font-bold text-slate-700 dark:text-slate-300 text-xs shadow-2xs transition-colors"
                 aria-haspopup="true"
                 aria-expanded={langDropdownOpen}
                 aria-label={t.languageSelect}
               >
-                <Languages className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                <Languages className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" aria-hidden="true" />
                 <span className="uppercase font-extrabold">{language}</span>
               </button>
 
               {langDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl py-2 z-50 text-xs animate-fade-in">
+                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl py-2 z-50 text-xs animate-fade-in">
                   <div className="px-3 py-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                    Primary Languages
+                    Primary & Regional Languages
                   </div>
-                  <button
-                    onClick={() => {
-                      setLanguage('en');
-                      setLangDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-3.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between ${
-                      language === 'en' ? 'font-bold text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/50' : 'text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <span>English (Default)</span>
-                    {language === 'en' && <span className="text-teal-600 dark:text-teal-400">✓</span>}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setLanguage('hi');
-                      setLangDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-3.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between ${
-                      language === 'hi' ? 'font-bold text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/50' : 'text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <span>हिंदी (Hindi)</span>
-                    {language === 'hi' && <span className="text-teal-600 dark:text-teal-400">✓</span>}
-                  </button>
-
-                  <div className="border-t border-slate-100 dark:border-slate-800 my-1"></div>
-                  <div className="px-3 py-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                    Regional Indian Languages
-                  </div>
-                  {regionalOptions.map((r) => (
+                  {languageOptions.map((opt) => (
                     <button
-                      key={r.code}
+                      type="button"
+                      key={opt.code}
                       onClick={() => {
-                        setLanguage(r.code as SupportedLanguage);
+                        setLanguage(opt.code as SupportedLanguage);
                         setLangDropdownOpen(false);
                       }}
-                      className={`w-full text-left px-3.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between ${
-                        language === r.code ? 'font-bold text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/50' : 'text-slate-700 dark:text-slate-300'
+                      className={`w-full text-left px-3.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                        language === opt.code
+                          ? 'font-bold text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/50'
+                          : 'text-slate-700 dark:text-slate-300'
                       }`}
                     >
-                      <span>{r.name}</span>
-                      {language === r.code && <span className="text-teal-600 dark:text-teal-400">✓</span>}
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className="font-semibold text-slate-900 dark:text-white">{opt.nativeName}</span>
+                        <span className="text-slate-500 dark:text-slate-400">({opt.englishName})</span>
+                      </span>
+                      {language === opt.code && (
+                        <span className="text-teal-600 dark:text-teal-400 flex-shrink-0" aria-hidden="true">✓</span>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -459,50 +442,54 @@ export const Navbar: React.FC = () => {
             {isAuthenticated && currentUser ? (
               <div className="relative">
                 <button
+                  type="button"
                   onClick={() => setUserDropdownOpen((prev) => !prev)}
-                  className="interactive-button flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-1.5 rounded-xl border border-teal-200/80 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 font-bold text-xs shadow-2xs transition-all"
-                  aria-label="User profile menu"
+                  title={currentUser.name}
+                  className="interactive-button flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-1.5 rounded-xl border border-teal-200/80 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 font-bold text-xs shadow-2xs transition-all max-w-[200px]"
+                  aria-label={`User profile menu for ${currentUser.name}`}
                   aria-expanded={userDropdownOpen}
                 >
                   {isSafeAvatarUrl(currentUser.avatarUrl) ? (
                     <img
                       src={currentUser.avatarUrl!}
-                      alt={currentUser.name}
+                      alt={`${currentUser.name} avatar`}
                       referrerPolicy="no-referrer"
                       className="w-5 h-5 rounded-full object-cover flex-shrink-0"
                     />
                   ) : (
-                    <div className="w-5 h-5 rounded-full bg-teal-600 text-white flex items-center justify-center text-[10px] font-black flex-shrink-0">
+                    <div className="w-5 h-5 rounded-full bg-teal-600 text-white flex items-center justify-center text-[10px] font-black flex-shrink-0" aria-hidden="true">
                       {currentUser.name.charAt(0).toUpperCase()}
                     </div>
                   )}
-                  <span className="hidden sm:inline max-w-[100px] truncate">{currentUser.name}</span>
+                  <span className="hidden sm:inline truncate">{currentUser.name}</span>
                 </button>
 
                 {userDropdownOpen && (
-                  <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl p-3 z-50 text-xs animate-fade-in space-y-2">
+                  <div className="absolute right-0 mt-2 w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl p-3 z-50 text-xs animate-fade-in space-y-2">
                     <div className="border-b border-slate-100 dark:border-slate-800 pb-2">
-                      <p className="font-extrabold text-slate-900 dark:text-white truncate">{currentUser.name}</p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{currentUser.email}</p>
+                      <p className="font-extrabold text-slate-900 dark:text-white break-words">{currentUser.name}</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 break-all">{currentUser.email}</p>
                     </div>
                     <button
+                      type="button"
                       onClick={() => {
                         setUserDropdownOpen(false);
                         handleTabClick('login');
                       }}
                       className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium flex items-center gap-2 transition-colors"
                     >
-                      <User className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                      <User className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" aria-hidden="true" />
                       <span>Account Details</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
                         setUserDropdownOpen(false);
-                        logout();
+                        void logout();
                       }}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-medium flex items-center gap-2 transition-colors"
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-2 transition-colors"
                     >
-                      <LogOut className="w-3.5 h-3.5" />
+                      <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>Sign Out</span>
                     </button>
                   </div>
@@ -557,13 +544,14 @@ export const Navbar: React.FC = () => {
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={() => {
-                    logout();
                     setMobileMenuOpen(false);
+                    void logout();
                   }}
                   className="px-2.5 py-1 text-xs font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400 flex items-center gap-1"
                 >
-                  <LogOut className="w-3.5 h-3.5" />
+                  <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>Sign Out</span>
                 </button>
               </div>

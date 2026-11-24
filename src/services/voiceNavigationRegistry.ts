@@ -136,6 +136,16 @@ export const HEALYAAR_SECTIONS: Record<NavTab, SectionRegistryItem> = {
     keywords: ['login', 'account', 'sign in', 'register', 'sign up', 'profile'],
     whereCanIKeywords: ['log in', 'sign in', 'create an account', 'access my profile']
   },
+  landing: {
+    tab: 'landing',
+    name: 'Welcome',
+    spokenName: 'Welcome page',
+    shortOverview: 'Welcome page introduces HealYaar features and privacy.',
+    detailedDescription: 'The Welcome page introduces HealYaar Dual-Layer RAG, voice accessibility, and privacy guarantees.',
+    actionQuestion: 'Would you like to view the Welcome page?',
+    keywords: ['welcome', 'landing', 'about healyaar'],
+    whereCanIKeywords: ['learn about healyaar']
+  },
   privacy: {
     tab: 'privacy',
     name: 'Privacy Policy',
@@ -155,6 +165,26 @@ export const HEALYAAR_SECTIONS: Record<NavTab, SectionRegistryItem> = {
     actionQuestion: 'Would you like to open Terms of Service?',
     keywords: ['terms', 'terms of service', 'disclaimer'],
     whereCanIKeywords: ['read terms', 'view terms of service']
+  },
+  cookies: {
+    tab: 'cookies',
+    name: 'Cookies Policy',
+    spokenName: 'Cookies Policy',
+    shortOverview: 'Cookies Policy explains essential-only browser storage.',
+    detailedDescription: 'Cookies Policy explains how HealYaar uses strictly essential storage with zero third-party ad trackers.',
+    actionQuestion: 'Would you like to open the Cookies Policy?',
+    keywords: ['cookies', 'cookies policy', 'local storage'],
+    whereCanIKeywords: ['read cookies policy']
+  },
+  refund: {
+    tab: 'refund',
+    name: 'Refund & Free-Access Policy',
+    spokenName: 'Refund Policy',
+    shortOverview: 'Refund Policy confirms HealYaar is free and non-commercial.',
+    detailedDescription: 'Refund and Free-Access Policy explains that HealYaar is free to use and processes no commercial transactions.',
+    actionQuestion: 'Would you like to open the Refund Policy?',
+    keywords: ['refund', 'refund policy', 'pricing', 'free access'],
+    whereCanIKeywords: ['read refund policy']
   }
 };
 

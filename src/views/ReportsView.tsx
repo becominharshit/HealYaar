@@ -5,7 +5,10 @@ import { LabTestMetric } from '../types';
 import { SectionHero } from '../components/ui/SectionHero';
 import { MedicalReportsIllustration } from '../components/ContextualIllustrations';
 import { medicalReportService } from '../services/medicalReportService';
+import { authService } from '../services/authService';
 import { indexMedicalReport, deleteChunksBySource } from '../services/rag/ragVaultService';
+import { formatDisplayDate } from '../utils/healthFormatters';
+import { PortalModal } from '../components/ui/PortalModal';
 import { Tooltip } from '../components/ui/Tooltip';
 import {
   FileSpreadsheet,
@@ -76,6 +79,10 @@ export const ReportsView: React.FC = () => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // First-time document upload consent (unchecked by default until accepted per user)
+  const [uploadConsentAccepted, setUploadConsentAccepted] = useState<boolean>(false);
+  const [uploadConsentError, setUploadConsentError] = useState<string | null>(null);
+
   // -------------------------------------------------------------
   // Persistent Report History (Supabase & Local)
   // -------------------------------------------------------------
@@ -84,6 +91,12 @@ export const ReportsView: React.FC = () => {
   useEffect(() => {
     let isMounted = true;
     if (currentUser?.id) {
+      try {
+        const storedConsent = localStorage.getItem(`healyaar_user_${currentUser.id}_upload_consent_reports`);
+        setUploadConsentAccepted(storedConsent === 'true');
+      } catch {
+        setUploadConsentAccepted(false);
+      }
       medicalReportService.getReports(currentUser.id).then((cloud) => {
         if (isMounted) {
           setReportHistory(cloud);
@@ -93,11 +106,25 @@ export const ReportsView: React.FC = () => {
       setReportHistory([]);
       setActiveReport(null);
       setPageState('empty');
+      setUploadConsentAccepted(false);
     }
     return () => {
       isMounted = false;
     };
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    const handleReset = () => {
+      setReportHistory([]);
+      setActiveReport(null);
+      setSelectedFile(null);
+      setIsDemoSelected(false);
+      setIsOriginalModalOpen(false);
+      setPageState('empty');
+    };
+    window.addEventListener('healyaar_session_reset', handleReset);
+    return () => window.removeEventListener('healyaar_session_reset', handleReset);
+  }, []);
 
   // -------------------------------------------------------------
   // File Selection Handlers
@@ -147,6 +174,19 @@ export const ReportsView: React.FC = () => {
   // Analysis Execution (No Fabricated Lab Values for Real Files)
   // -------------------------------------------------------------
   const handleAnalyze = () => {
+    if (!isDemoSelected && selectedFile && !uploadConsentAccepted) {
+      setUploadConsentError('Please confirm your consent to process this medical report on your device before continuing.');
+      return;
+    }
+    setUploadConsentError(null);
+    if (!isDemoSelected && selectedFile && currentUser?.id) {
+      try {
+        localStorage.setItem(`healyaar_user_${currentUser.id}_upload_consent_reports`, 'true');
+      } catch {
+        // ignore
+      }
+      authService.recordConsent(currentUser.id, 'report_upload', '1.0').catch(() => {});
+    }
     setPageState('analyzing');
 
     const executeProcessing = async () => {
@@ -460,13 +500,42 @@ export const ReportsView: React.FC = () => {
                 </button>
               </div>
 
+              {/* First-Time Upload Consent Checkbox (Real Uploads) */}
+              {!isDemoSelected && selectedFile && (
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="report-upload-consent"
+                    className="flex items-start gap-2.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-200 dark:border-teal-800 cursor-pointer text-xs text-slate-700 dark:text-slate-300"
+                  >
+                    <input
+                      id="report-upload-consent"
+                      type="checkbox"
+                      checked={uploadConsentAccepted}
+                      onChange={(e) => {
+                        setUploadConsentAccepted(e.target.checked);
+                        if (e.target.checked) setUploadConsentError(null);
+                      }}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500 flex-shrink-0"
+                    />
+                    <span>
+                      I consent to HealYaar processing this medical report locally for plain-language educational summary and indexing it privately inside my user-scoped Health Vault (not diagnostic).
+                    </span>
+                  </label>
+                  {uploadConsentError && (
+                    <p role="alert" className="text-xs font-semibold text-rose-600 dark:text-rose-400">
+                      {uploadConsentError}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="flex items-center gap-3 pt-2">
                 <button
                   type="button"
                   onClick={handleAnalyze}
                   className="flex-1 py-3 px-6 bg-teal-600 hover:bg-teal-700 text-white font-extrabold rounded-xl shadow transition-all active:scale-95 text-sm flex items-center justify-center gap-2"
                 >
-                  <Sparkles className="w-4 h-4" />
+                  <Sparkles className="w-4 h-4" aria-hidden="true" />
                   <span>Analyze Report</span>
                 </button>
                 <button
@@ -563,7 +632,7 @@ export const ReportsView: React.FC = () => {
               )}
             </div>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-              File: <strong className="text-slate-700 dark:text-slate-300">{activeReport.fileName}</strong> • Uploaded on {activeReport.uploadDate}
+              File: <strong className="text-slate-700 dark:text-slate-300">{activeReport.fileName}</strong> • Uploaded on {formatDisplayDate(activeReport.uploadDate)}
             </p>
           </div>
 
@@ -726,7 +795,7 @@ export const ReportsView: React.FC = () => {
                       )}
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                      {rep.fileName} • {rep.uploadDate}
+                      {rep.fileName} • {formatDisplayDate(rep.uploadDate)}
                     </p>
                   </div>
 
@@ -757,36 +826,41 @@ export const ReportsView: React.FC = () => {
       )}
 
       {/* =============================================================
-          ORIGINAL REPORT PREVIEW MODAL
+          ORIGINAL REPORT PREVIEW MODAL (PORTALIZED)
       ============================================================= */}
-      {isOriginalModalOpen && activeReport && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-800 rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-4 shadow-2xl border border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
+      <PortalModal
+        isOpen={Boolean(isOriginalModalOpen && activeReport)}
+        onClose={() => setIsOriginalModalOpen(false)}
+        ariaLabelledBy="original-report-modal-title"
+      >
+        {activeReport && (
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-4 shadow-2xl border border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
               <div>
-                <h3 className="font-black text-lg text-slate-900 dark:text-white">
+                <h3 id="original-report-modal-title" className="font-black text-lg text-slate-900 dark:text-white">
                   Original Report Document
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {activeReport.fileName} ({activeReport.fileSizeFormatted || 'Document'})
+                  {activeReport.fileName} ({activeReport.fileSizeFormatted || 'Document'}) • {formatDisplayDate(activeReport.uploadDate)}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsOriginalModalOpen(false)}
+                aria-label="Close original report preview"
                 className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
 
-            {/* Document display */}
+            {/* Document display: Image / PDF / Raw Text / Structured Lab Report Preview */}
             {activeReport.fileDataUrl ? (
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-50 dark:bg-slate-900 p-2 text-center">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-50 dark:bg-slate-950 p-2 text-center">
                 {activeReport.fileDataUrl.startsWith('data:image') ? (
                   <img
                     src={activeReport.fileDataUrl}
-                    alt={activeReport.fileName}
+                    alt={`Original uploaded medical report: ${activeReport.fileName}`}
                     className="max-h-96 mx-auto rounded-xl object-contain shadow-xs"
                   />
                 ) : (
@@ -798,18 +872,81 @@ export const ReportsView: React.FC = () => {
                 )}
               </div>
             ) : activeReport.fileTextContent ? (
-              <pre className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-slate-800 dark:text-slate-200">
+              <pre className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-slate-800 dark:text-slate-200">
                 {activeReport.fileTextContent}
               </pre>
             ) : (
-              <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2 text-center">
-                <FileCheck className="w-10 h-10 text-teal-600 mx-auto" />
-                <h4 className="font-bold text-slate-900 dark:text-white">
-                  {activeReport.fileName}
-                </h4>
-                <p className="text-xs text-slate-500">
-                  Original file preserved locally in browser session on {activeReport.uploadDate}.
-                </p>
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 p-5 space-y-4 text-left">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <FileCheck className="w-6 h-6 text-teal-600 dark:text-teal-400" aria-hidden="true" />
+                    <div>
+                      <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                        {activeReport.title}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {activeReport.isDemo ? 'Structured Lab Sheet (Demo Document)' : 'Archived Clinical Record'} • {formatDisplayDate(activeReport.uploadDate)}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-300 text-[11px] font-bold">
+                    {activeReport.fileName}
+                  </span>
+                </div>
+
+                {activeReport.metrics && activeReport.metrics.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase text-[10px]">
+                          <th className="py-2 pr-3">Biomarker</th>
+                          <th className="py-2 pr-3">Observed</th>
+                          <th className="py-2 pr-3">Reference Range</th>
+                          <th className="py-2">Flag</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200/70 dark:divide-slate-800">
+                        {activeReport.metrics.map((m, idx) => (
+                          <tr key={idx} className="text-slate-800 dark:text-slate-200">
+                            <td className="py-2 pr-3 font-bold">{m.name}</td>
+                            <td className="py-2 pr-3 font-mono font-bold">
+                              {m.value} {m.unit}
+                            </td>
+                            <td className="py-2 pr-3 text-slate-500 dark:text-slate-400">{m.referenceRange}</td>
+                            <td className="py-2">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                  m.status === 'normal'
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                    : m.status === 'low'
+                                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                                    : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300'
+                                }`}
+                              >
+                                {m.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {activeReport.summary}
+                  </p>
+                )}
+
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1">
+                  <div className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+                    Recorded Highlights
+                  </div>
+                  <ul className="list-disc pl-5 text-xs text-slate-700 dark:text-slate-300 space-y-1">
+                    {activeReport.keyFindings.map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             )}
 
@@ -817,14 +954,14 @@ export const ReportsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsOriginalModalOpen(false)}
-                className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl"
+                className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl"
               >
                 Close Preview
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </PortalModal>
     </div>
   );
 };
