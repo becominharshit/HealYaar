@@ -1,23 +1,16 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import {
-  APIProvider,
-  Map as GoogleMap,
-  AdvancedMarker,
-  Pin,
-  InfoWindow,
-  useMap,
-  useMapsLibrary
-} from '@vis.gl/react-google-maps';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap as useLeafletMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import { useApp } from '../context/AppContext';
 import { SectionHero } from '../components/ui/SectionHero';
 import { DoctorFinderIllustration } from '../components/ContextualIllustrations';
 import { PortalModal } from '../components/ui/PortalModal';
-import { SafeMarkdown } from '../components/ui/SafeMarkdown';
 import { EmptyStateCard } from '../components/ui/EmptyStateCard';
-import { FavoritePlace, GoogleMapsGroundingSource } from '../types';
+import { FavoritePlace } from '../types';
 import {
   getBrowserCurrentPosition,
   reverseGeocodeCoordinates,
@@ -25,7 +18,6 @@ import {
   calculateHaversineDistanceKm,
   UserGeoLocation
 } from '../services/locationService';
-import { aiClient } from '../services/aiClient';
 import { favoritesService } from '../services/favoritesService';
 import {
   Stethoscope,
@@ -35,12 +27,9 @@ import {
   RefreshCw,
   AlertCircle,
   Building2,
-  Star,
   Phone,
-  ExternalLink,
   Heart,
   Calendar,
-  Sparkles,
   ShieldAlert,
   BookmarkCheck,
   Navigation,
@@ -49,8 +38,12 @@ import {
   CheckCircle2
 } from 'lucide-react';
 
-const GOOGLE_MAPS_API_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
-const HAS_GOOGLE_MAPS = Boolean(GOOGLE_MAPS_API_KEY);
+// Fix default Leaflet marker icon paths for Vite production & dev bundling
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow
+});
 
 type CareCategory = 'all' | 'hospital' | 'clinic' | 'doctor' | 'pharmacy';
 
@@ -62,9 +55,7 @@ interface RealCarePlace {
   lat: number;
   lng: number;
   distanceKm: number;
-  rating?: number;
-  userRatingCount?: number;
-  openNow?: boolean;
+  openingHours?: string;
   phone?: string;
   mapsUrl: string;
 }
@@ -88,43 +79,18 @@ const QUICK_CITIES = [
   { label: 'Chennai', query: 'Chennai, Tamil Nadu' }
 ];
 
-const CATEGORY_OPTIONS: Array<{ id: CareCategory; label: string; googleTypes: string[]; osmFilter: string }> = [
-  {
-    id: 'all',
-    label: 'All Healthcare',
-    googleTypes: ['hospital', 'doctor', 'pharmacy'],
-    osmFilter: 'hospital|clinic|doctors|pharmacy'
-  },
-  {
-    id: 'hospital',
-    label: 'Hospital',
-    googleTypes: ['hospital'],
-    osmFilter: 'hospital'
-  },
-  {
-    id: 'clinic',
-    label: 'Clinic',
-    googleTypes: ['medical_lab', 'doctor', 'hospital'],
-    osmFilter: 'clinic'
-  },
-  {
-    id: 'doctor',
-    label: 'Doctor',
-    googleTypes: ['doctor'],
-    osmFilter: 'doctors'
-  },
-  {
-    id: 'pharmacy',
-    label: 'Pharmacy',
-    googleTypes: ['pharmacy'],
-    osmFilter: 'pharmacy'
-  }
+const CATEGORY_OPTIONS: Array<{ id: CareCategory; label: string; osmFilter: string }> = [
+  { id: 'all', label: 'All Healthcare', osmFilter: 'hospital|clinic|doctors|pharmacy' },
+  { id: 'hospital', label: 'Hospital', osmFilter: 'hospital' },
+  { id: 'clinic', label: 'Clinic', osmFilter: 'clinic' },
+  { id: 'doctor', label: 'Doctor', osmFilter: 'doctors' },
+  { id: 'pharmacy', label: 'Pharmacy', osmFilter: 'pharmacy' }
 ];
 
-function isQuotaError(err: unknown): boolean {
-  const text = err instanceof Error ? err.message : String(err || '');
-  return /429|RESOURCE_EXHAUSTED|OVER_QUERY_LIMIT|quota/i.test(text);
-}
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter'
+];
 
 function getLocalTomorrowIso(): string {
   const d = new Date();
@@ -136,7 +102,7 @@ function getLocalTomorrowIso(): string {
 }
 
 function makeLeafletPinIcon(color: string, active: boolean) {
-  const size = active ? 32 : 24;
+  const size = active ? 30 : 22;
   return L.divIcon({
     className: 'healyaar-leaflet-pin',
     html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:${color};border:3px solid #ffffff;box-shadow:0 3px 10px rgba(15,23,42,0.35);"></div>`,
@@ -145,239 +111,11 @@ function makeLeafletPinIcon(color: string, active: boolean) {
   });
 }
 
-// ============================================================================
-// GOOGLE MAPS EXPERIENCE (Mounted ONLY when VITE_GOOGLE_MAPS_API_KEY is present)
-// Uses @vis.gl/react-google-maps + Places API (New) + Gemini Grounding with Google Maps
-// ============================================================================
-interface GoogleCareMapProps {
-  center: { lat: number; lng: number };
-  category: CareCategory;
-  radiusKm: number;
-  keyword: string;
-  searchNonce: number;
-  selectedPlaceId: string | null;
-  onSelectPlace: (place: RealCarePlace | null) => void;
-  onPlacesLoaded: (places: RealCarePlace[], loading: boolean, error: string | null) => void;
-}
-
-const GoogleCareMapController: React.FC<GoogleCareMapProps> = ({
-  center,
-  category,
-  radiusKm,
-  keyword,
-  searchNonce,
-  selectedPlaceId,
-  onSelectPlace,
-  onPlacesLoaded
-}) => {
-  const map = useMap();
-  const placesLib = useMapsLibrary('places');
-  const [places, setPlaces] = useState<RealCarePlace[]>([]);
-
-  const selectedPlace = useMemo(
-    () => places.find((p) => p.id === selectedPlaceId) || null,
-    [places, selectedPlaceId]
-  );
-
-  // Pan map when user location changes
-  useEffect(() => {
-    if (map) {
-      map.panTo(center);
-    }
-  }, [map, center.lat, center.lng]);
-
-  // Pan map when a list card is clicked
-  useEffect(() => {
-    if (map && selectedPlace) {
-      map.panTo({ lat: selectedPlace.lat, lng: selectedPlace.lng });
-    }
-  }, [map, selectedPlace]);
-
-  // Search real facilities via Places API (New) — NEVER legacy PlacesService
-  useEffect(() => {
-    if (!placesLib) return;
-    let cancelled = false;
-
-    const runSearch = async () => {
-      onPlacesLoaded([], true, null);
-      try {
-        const PlaceClass = (placesLib as unknown as {
-          Place: {
-            searchNearby: (req: Record<string, unknown>) => Promise<{ places?: Array<Record<string, unknown>> }>;
-            searchByText: (req: Record<string, unknown>) => Promise<{ places?: Array<Record<string, unknown>> }>;
-          };
-        }).Place;
-
-        const fields = [
-          'id',
-          'displayName',
-          'formattedAddress',
-          'location',
-          'rating',
-          'userRatingCount',
-          'regularOpeningHours',
-          'nationalPhoneNumber',
-          'googleMapsURI',
-          'primaryTypeDisplayName'
-        ];
-
-        const catConfig = CATEGORY_OPTIONS.find((c) => c.id === category) || CATEGORY_OPTIONS[0];
-        let rawPlaces: Array<Record<string, unknown>> = [];
-
-        if (keyword.trim()) {
-          const textQuery = `${keyword.trim()} ${category === 'all' ? 'hospital clinic doctor pharmacy' : category}`;
-          const res = await PlaceClass.searchByText({
-            textQuery,
-            fields,
-            locationBias: {
-              center,
-              radius: Math.min(radiusKm * 1000, 50000)
-            },
-            maxResultCount: 15,
-            region: 'IN'
-          });
-          rawPlaces = res.places || [];
-        } else {
-          const res = await PlaceClass.searchNearby({
-            fields,
-            locationRestriction: {
-              center,
-              radius: Math.min(radiusKm * 1000, 50000)
-            },
-            includedPrimaryTypes: catConfig.googleTypes,
-            maxResultCount: 15
-          });
-          rawPlaces = res.places || [];
-        }
-
-        if (cancelled) return;
-
-        const mapped: RealCarePlace[] = rawPlaces
-          .map((p, idx) => {
-            const loc = p.location as { lat?: () => number; lng?: () => number } | undefined;
-            const lat = typeof loc?.lat === 'function' ? loc.lat() : Number((loc as { lat?: number })?.lat);
-            const lng = typeof loc?.lng === 'function' ? loc.lng() : Number((loc as { lng?: number })?.lng);
-            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-
-            const dist = calculateHaversineDistanceKm(center.lat, center.lng, lat, lng);
-            const name =
-              typeof p.displayName === 'string'
-                ? p.displayName
-                : ((p.displayName as { text?: string } | undefined)?.text || 'Healthcare Facility');
-            const primaryType =
-              typeof p.primaryTypeDisplayName === 'string'
-                ? p.primaryTypeDisplayName
-                : ((p.primaryTypeDisplayName as { text?: string } | undefined)?.text || catConfig.label);
-            const opening = p.regularOpeningHours as { openNow?: boolean } | undefined;
-
-            return {
-              id: typeof p.id === 'string' ? p.id : `gmp-${idx}-${lat.toFixed(4)}`,
-              name,
-              category: primaryType,
-              address: typeof p.formattedAddress === 'string' ? p.formattedAddress : '',
-              lat,
-              lng,
-              distanceKm: dist,
-              rating: typeof p.rating === 'number' ? p.rating : undefined,
-              userRatingCount: typeof p.userRatingCount === 'number' ? p.userRatingCount : undefined,
-              openNow: typeof opening?.openNow === 'boolean' ? opening.openNow : undefined,
-              phone: typeof p.nationalPhoneNumber === 'string' ? p.nationalPhoneNumber : undefined,
-              mapsUrl:
-                typeof p.googleMapsURI === 'string' && p.googleMapsURI
-                  ? p.googleMapsURI
-                  : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`
-            } as RealCarePlace;
-          })
-          .filter((item): item is RealCarePlace => item !== null && item.distanceKm <= radiusKm + 5)
-          .sort((a, b) => a.distanceKm - b.distanceKm);
-
-        setPlaces(mapped);
-        onPlacesLoaded(mapped, false, null);
-      } catch (err) {
-        if (cancelled) return;
-        if (isQuotaError(err)) {
-          window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-        }
-        const msg =
-          err instanceof Error
-            ? err.message
-            : 'Unable to load nearby facilities from Google Places right now.';
-        setPlaces([]);
-        onPlacesLoaded([], false, msg);
-      }
-    };
-
-    void runSearch();
-    return () => {
-      cancelled = true;
-    };
-  }, [placesLib, center.lat, center.lng, category, radiusKm, keyword, searchNonce]);
-
-  return (
-    <>
-      {/* User's Current Center Pin */}
-      <AdvancedMarker position={center} title="Selected Search Area">
-        <Pin background="#0f766e" borderColor="#ffffff" glyphColor="#ffffff" />
-      </AdvancedMarker>
-
-      {/* Real Healthcare Facility Pins */}
-      {places.map((place) => {
-        const isSelected = place.id === selectedPlaceId;
-        return (
-          <AdvancedMarker
-            key={place.id}
-            position={{ lat: place.lat, lng: place.lng }}
-            title={place.name}
-            onClick={() => onSelectPlace(place)}
-          >
-            <Pin
-              background={isSelected ? '#0d9488' : '#e11d48'}
-              borderColor="#ffffff"
-              glyphColor="#ffffff"
-              scale={isSelected ? 1.2 : 1}
-            />
-          </AdvancedMarker>
-        );
-      })}
-
-      {/* InfoWindow for Selected Facility */}
-      {selectedPlace && (
-        <InfoWindow
-          position={{ lat: selectedPlace.lat, lng: selectedPlace.lng }}
-          onCloseClick={() => onSelectPlace(null)}
-        >
-          <div className="p-1 max-w-[230px] text-slate-900 space-y-1">
-            <div className="text-xs font-extrabold leading-snug">{selectedPlace.name}</div>
-            <div className="text-[11px] text-teal-700 font-semibold">
-              {selectedPlace.category} • {selectedPlace.distanceKm} km away
-            </div>
-            {selectedPlace.address && (
-              <p className="text-[11px] text-slate-600 leading-snug">{selectedPlace.address}</p>
-            )}
-            <a
-              href={`https://www.google.com/maps/dir/?api=1&destination=${selectedPlace.lat},${selectedPlace.lng}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[11px] font-bold text-teal-700 underline pt-0.5"
-            >
-              <span>Directions in Google Maps</span>
-            </a>
-          </div>
-        </InfoWindow>
-      )}
-    </>
-  );
-};
-
-// ============================================================================
-// LEAFLET / OPENSTREETMAP FALLBACK (ONLY when VITE_GOOGLE_MAPS_API_KEY is absent)
-// Never combines Google Maps data onto Leaflet!
-// ============================================================================
-const LeafletViewportSync: React.FC<{ center: [number, number] }> = ({ center }) => {
+const LeafletViewportSync: React.FC<{ center: [number, number]; zoom?: number }> = ({ center, zoom }) => {
   const map = useLeafletMap();
   useEffect(() => {
-    map.setView(center, map.getZoom(), { animate: true });
-  }, [map, center[0], center[1]]);
+    map.setView(center, zoom ?? map.getZoom(), { animate: true });
+  }, [map, center[0], center[1], zoom]);
   return null;
 };
 
@@ -390,19 +128,35 @@ async function fetchOsmNearbyPlaces(
 ): Promise<RealCarePlace[]> {
   const cat = CATEGORY_OPTIONS.find((c) => c.id === category) || CATEGORY_OPTIONS[0];
   const radiusMeters = Math.min(radiusKm * 1000, 25000);
-  const query = `[out:json][timeout:12];(node["amenity"~"${cat.osmFilter}"](around:${radiusMeters},${lat},${lng});way["amenity"~"${cat.osmFilter}"](around:${radiusMeters},${lat},${lng}););out center 25;`;
+  const query = `[out:json][timeout:12];(node["amenity"~"${cat.osmFilter}"](around:${radiusMeters},${lat},${lng});way["amenity"~"${cat.osmFilter}"](around:${radiusMeters},${lat},${lng}););out center 30;`;
 
-  const response = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(query)}`
-  });
+  let json: { elements?: Array<Record<string, unknown>> } | null = null;
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    throw new Error('OpenStreetMap directory temporarily busy. Try again in a moment.');
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (response.ok) {
+        json = await response.json();
+        break;
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error('Directory lookup failed');
+    }
   }
 
-  const json = await response.json();
+  if (!json) {
+    throw lastError || new Error('OpenStreetMap healthcare directory is temporarily busy. Please retry in a moment.');
+  }
+
   const elements = Array.isArray(json.elements) ? json.elements : [];
   const lowerKey = keyword.trim().toLowerCase();
 
@@ -418,23 +172,30 @@ async function fetchOsmNearbyPlaces(
       if (typeof pLat !== 'number' || typeof pLng !== 'number') return null;
 
       const amenity = tags.amenity || 'healthcare';
+      const specialty = tags['healthcare:speciality'] || tags.healthcare || '';
+      const categoryLabel = specialty
+        ? `${amenity.charAt(0).toUpperCase() + amenity.slice(1)} • ${specialty.replace(/_/g, ' ')}`
+        : amenity.charAt(0).toUpperCase() + amenity.slice(1);
+
       const addressParts = [
         tags['addr:housenumber'],
         tags['addr:street'],
         tags['addr:suburb'],
-        tags['addr:city']
+        tags['addr:city'],
+        tags['addr:postcode']
       ].filter(Boolean);
 
       const place: RealCarePlace = {
         id: `osm-${el.id || idx}`,
         name,
-        category: amenity.charAt(0).toUpperCase() + amenity.slice(1),
-        address: addressParts.join(', ') || tags['addr:full'] || 'Address via OpenStreetMap',
+        category: categoryLabel,
+        address: addressParts.join(', ') || tags['addr:full'] || 'Verified OpenStreetMap location',
         lat: pLat,
         lng: pLng,
         distanceKm: calculateHaversineDistanceKm(lat, lng, pLat, pLng),
+        openingHours: tags.opening_hours || undefined,
         phone: tags.phone || tags['contact:phone'] || undefined,
-        mapsUrl: `https://www.openstreetmap.org/?mlat=${pLat}&mlon=${pLng}#map=16/${pLat}/${pLng}`
+        mapsUrl: `https://www.google.com/maps/dir/?api=1&destination=${pLat},${pLng}`
       };
 
       if (lowerKey) {
@@ -446,18 +207,14 @@ async function fetchOsmNearbyPlaces(
     })
     .filter((p: RealCarePlace | null): p is RealCarePlace => p !== null)
     .sort((a: RealCarePlace, b: RealCarePlace) => a.distanceKm - b.distanceKm)
-    .slice(0, 20);
+    .slice(0, 25);
 }
 
-// ============================================================================
-// MAIN VIEW: DOCTORS & CARE NEARBY
-// ============================================================================
 export const DoctorsNearbyView: React.FC = () => {
   const { currentUser, showToast, addReminder, setTab } = useApp();
 
   const [activeTab, setActiveTab] = useState<'explore' | 'saved'>('explore');
 
-  // Initial category (honors jump from Prescriptions -> Pharmacies)
   const [category, setCategory] = useState<CareCategory>(() => {
     try {
       const preset = sessionStorage.getItem('healyaar_doctors_filter');
@@ -483,7 +240,6 @@ export const DoctorsNearbyView: React.FC = () => {
   const [appliedKeyword, setAppliedKeyword] = useState<string>('');
   const [searchNonce, setSearchNonce] = useState<number>(0);
 
-  // User Location
   const [userLocation, setUserLocation] = useState<UserGeoLocation>(() => {
     try {
       const saved = sessionStorage.getItem('healyaar_user_location');
@@ -498,23 +254,14 @@ export const DoctorsNearbyView: React.FC = () => {
   const [manualCityInput, setManualCityInput] = useState<string>('');
   const [isGeocoding, setIsGeocoding] = useState<boolean>(false);
 
-  // Real Facilities & Selection
   const [places, setPlaces] = useState<RealCarePlace[]>([]);
   const [isLoadingPlaces, setIsLoadingPlaces] = useState<boolean>(false);
   const [placesError, setPlacesError] = useState<string | null>(null);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
 
-  // Gemini 4 Hydrogen Grounding with Google Maps (used strictly in Google Maps mode)
-  const [groundedSummary, setGroundedSummary] = useState<string | null>(null);
-  const [groundedSources, setGroundedSources] = useState<GoogleMapsGroundingSource[]>([]);
-  const [groundedPoweredBy, setGroundedPoweredBy] = useState<string | null>(null);
-  const [isLoadingGrounded, setIsLoadingGrounded] = useState<boolean>(false);
-
-  // Saved Favorite Places (per-user Supabase RLS)
   const [favorites, setFavorites] = useState<FavoritePlace[]>([]);
   const [savingPlaceId, setSavingPlaceId] = useState<string | null>(null);
 
-  // Appointment Reminder Modal
   const [reminderPlace, setReminderPlace] = useState<{
     name: string;
     address: string;
@@ -527,7 +274,7 @@ export const DoctorsNearbyView: React.FC = () => {
   );
   const [appointmentSaved, setAppointmentSaved] = useState<boolean>(false);
 
-  // Load user's saved favorite clinics & doctors
+  // Load user's saved favorite clinics & doctors from Supabase
   useEffect(() => {
     let active = true;
     if (currentUser?.id) {
@@ -630,55 +377,9 @@ export const DoctorsNearbyView: React.FC = () => {
     }
   };
 
-  // Trigger Gemini 4 Hydrogen Grounding with Google Maps ONLY when Google Maps mode is active
+  // Query real nearby hospitals, clinics, doctors, and pharmacies from OpenStreetMap Overpass API
   useEffect(() => {
-    if (!HAS_GOOGLE_MAPS || activeTab !== 'explore') return;
-    let cancelled = false;
-
-    const fetchGroundedSummary = async () => {
-      setIsLoadingGrounded(true);
-      try {
-        const res = await aiClient.searchNearbyCare({
-          latitude: userLocation.latitude,
-          longitude: userLocation.longitude,
-          category: category === 'all' ? 'hospitals, clinics, doctors, and pharmacies' : category,
-          query: appliedKeyword || undefined
-        });
-        if (!cancelled) {
-          setGroundedSummary(res.summaryMarkdown || null);
-          setGroundedSources(Array.isArray(res.googleMapsSources) ? res.googleMapsSources : []);
-          setGroundedPoweredBy(res.poweredBy || 'Gemini 4 Hydrogen');
-        }
-      } catch (err) {
-        if (!cancelled) {
-          if (isQuotaError(err)) {
-            window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-          }
-          setGroundedSummary(null);
-          setGroundedSources([]);
-          setGroundedPoweredBy(null);
-        }
-      } finally {
-        if (!cancelled) setIsLoadingGrounded(false);
-      }
-    };
-
-    void fetchGroundedSummary();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    userLocation.latitude,
-    userLocation.longitude,
-    category,
-    appliedKeyword,
-    searchNonce,
-    activeTab
-  ]);
-
-  // Pure OpenStreetMap Overpass query ONLY when Google Maps key is NOT configured
-  useEffect(() => {
-    if (HAS_GOOGLE_MAPS || activeTab !== 'explore') return;
+    if (activeTab !== 'explore') return;
     let cancelled = false;
 
     const loadOsm = async () => {
@@ -721,20 +422,6 @@ export const DoctorsNearbyView: React.FC = () => {
     searchNonce,
     activeTab
   ]);
-
-  const handleGooglePlacesLoaded = useCallback(
-    (loaded: RealCarePlace[], loading: boolean, error: string | null) => {
-      setIsLoadingPlaces(loading);
-      setPlacesError(error);
-      if (!loading) {
-        setPlaces(loaded);
-        setSelectedPlaceId((prev) =>
-          prev && loaded.some((p) => p.id === prev) ? prev : loaded[0]?.id || null
-        );
-      }
-    },
-    []
-  );
 
   const isPlaceSaved = (place: RealCarePlace): FavoritePlace | undefined =>
     favorites.find(
@@ -796,9 +483,17 @@ export const DoctorsNearbyView: React.FC = () => {
     showToast(`Personal visit reminder saved for ${appointmentDate} at ${appointmentTime}.`);
   };
 
-  const mapCenter = useMemo(
-    () => ({ lat: userLocation.latitude, lng: userLocation.longitude }),
-    [userLocation.latitude, userLocation.longitude]
+  const selectedPlace = useMemo(
+    () => places.find((p) => p.id === selectedPlaceId) || null,
+    [places, selectedPlaceId]
+  );
+
+  const viewportCenter = useMemo<[number, number]>(
+    () =>
+      selectedPlace
+        ? [selectedPlace.lat, selectedPlace.lng]
+        : [userLocation.latitude, userLocation.longitude],
+    [selectedPlace, userLocation.latitude, userLocation.longitude]
   );
 
   return (
@@ -808,7 +503,7 @@ export const DoctorsNearbyView: React.FC = () => {
         title="Nearby Care & Live Map"
         badge={{
           icon: Stethoscope,
-          text: HAS_GOOGLE_MAPS ? 'Google Maps Live' : 'OpenStreetMap Live',
+          text: 'OpenStreetMap Live',
           variant: 'emerald'
         }}
         illustration={<DoctorFinderIllustration size="md" />}
@@ -874,7 +569,7 @@ export const DoctorsNearbyView: React.FC = () => {
         </div>
       </div>
 
-      {/* TAB 1: REAL INTERACTIVE NEARBY CARE MAP */}
+      {/* TAB 1: REAL INTERACTIVE OPENSTREETMAP CARE MAP */}
       {activeTab === 'explore' && (
         <div className="space-y-6">
           {/* Search & Filters Card */}
@@ -916,7 +611,7 @@ export const DoctorsNearbyView: React.FC = () => {
                     type="text"
                     value={keywordInput}
                     onChange={(e) => setKeywordInput(e.target.value)}
-                    placeholder="Filter specialty or name (e.g. Cardiologist, Pediatrician, 24x7)..."
+                    placeholder="Filter specialty or name (e.g. Eye, Dental, Apollo, Pharmacy)..."
                     className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
@@ -1003,144 +698,86 @@ export const DoctorsNearbyView: React.FC = () => {
             )}
           </section>
 
-          {/* Split Layout: Live Interactive Map + Facility Cards */}
+          {/* Split Layout: Free Interactive Leaflet + OpenStreetMap Map & Facility Cards */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Interactive Map Panel */}
-            <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-3xl p-3 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-              <div className="h-[440px] w-full rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 relative bg-slate-100 dark:bg-slate-950">
-                {HAS_GOOGLE_MAPS ? (
-                  <APIProvider apiKey={GOOGLE_MAPS_API_KEY} language="en" region="IN">
-                    <GoogleMap
-                      defaultCenter={mapCenter}
-                      defaultZoom={13}
-                      mapId="DEMO_MAP_ID"
-                      gestureHandling="greedy"
-                      disableDefaultUI={false}
-                      internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-                      className="w-full h-full"
-                    >
-                      <GoogleCareMapController
-                        center={mapCenter}
-                        category={category}
-                        radiusKm={radiusKm}
-                        keyword={appliedKeyword}
-                        searchNonce={searchNonce}
-                        selectedPlaceId={selectedPlaceId}
-                        onSelectPlace={(p) => setSelectedPlaceId(p?.id || null)}
-                        onPlacesLoaded={handleGooglePlacesLoaded}
-                      />
-                    </GoogleMap>
-                  </APIProvider>
-                ) : (
-                  <MapContainer
-                    center={[mapCenter.lat, mapCenter.lng]}
-                    zoom={13}
-                    scrollWheelZoom={true}
-                    className="w-full h-full z-0"
+            {/* Interactive Leaflet Map Panel */}
+            <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-3xl p-3 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2.5">
+              <div className="h-[480px] w-full rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 relative bg-slate-100 dark:bg-slate-950">
+                <MapContainer
+                  center={[userLocation.latitude, userLocation.longitude]}
+                  zoom={13}
+                  scrollWheelZoom={true}
+                  className="w-full h-full z-0"
+                >
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  <LeafletViewportSync center={viewportCenter} />
+
+                  {/* User Selected Search Center Pin */}
+                  <Marker
+                    position={[userLocation.latitude, userLocation.longitude]}
+                    icon={makeLeafletPinIcon('#0f766e', true)}
                   >
-                    <TileLayer
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    />
-                    <LeafletViewportSync center={[mapCenter.lat, mapCenter.lng]} />
-                    <Marker
-                      position={[mapCenter.lat, mapCenter.lng]}
-                      icon={makeLeafletPinIcon('#0f766e', true)}
-                    >
-                      <Popup>
-                        <strong>Selected Area:</strong> {userLocation.locationName}
-                      </Popup>
-                    </Marker>
-                    {places.map((place) => (
+                    <Popup>
+                      <div className="text-xs space-y-0.5">
+                        <div className="font-bold text-slate-900">Your Search Area</div>
+                        <div className="text-slate-600">{userLocation.locationName}</div>
+                      </div>
+                    </Popup>
+                  </Marker>
+
+                  {/* Real Nearby Healthcare Facility Markers */}
+                  {places.map((place) => {
+                    const isSelected = place.id === selectedPlaceId;
+                    return (
                       <Marker
                         key={place.id}
                         position={[place.lat, place.lng]}
-                        icon={makeLeafletPinIcon(
-                          place.id === selectedPlaceId ? '#0d9488' : '#e11d48',
-                          place.id === selectedPlaceId
-                        )}
+                        icon={makeLeafletPinIcon(isSelected ? '#0d9488' : '#e11d48', isSelected)}
                         eventHandlers={{
                           click: () => setSelectedPlaceId(place.id)
                         }}
                       >
                         <Popup>
-                          <div className="space-y-1 text-xs">
-                            <div className="font-bold">{place.name}</div>
-                            <div>
-                              {place.category} • {place.distanceKm} km
+                          <div className="space-y-1 text-xs max-w-[220px]">
+                            <div className="font-extrabold text-slate-900">{place.name}</div>
+                            <div className="text-teal-700 font-semibold">
+                              {place.category} • {place.distanceKm} km away
                             </div>
+                            {place.address && (
+                              <div className="text-slate-600 leading-snug">{place.address}</div>
+                            )}
                             <a
                               href={`https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-teal-700 font-bold underline"
+                              className="inline-block text-teal-700 font-bold underline pt-0.5"
                             >
-                              Directions
+                              Get Directions
                             </a>
                           </div>
                         </Popup>
                       </Marker>
-                    ))}
-                  </MapContainer>
-                )}
+                    );
+                  })}
+                </MapContainer>
               </div>
 
-              {/* Gemini 4 Hydrogen Grounding with Google Maps Summary + Mandatory Source Attribution */}
-              {HAS_GOOGLE_MAPS && (isLoadingGrounded || groundedSummary) && (
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-teal-600 dark:text-teal-400" aria-hidden="true" />
-                      <span>AI Local Care Guide (Google Maps Grounded)</span>
-                    </h3>
-                    {groundedPoweredBy && (
-                      <span className="text-[11px] font-bold text-teal-700 dark:text-teal-300">
-                        Powered by {groundedPoweredBy}
-                      </span>
-                    )}
-                  </div>
-
-                  {isLoadingGrounded ? (
-                    <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-                      <span>Checking verified healthcare places around {userLocation.locationName}...</span>
-                    </div>
-                  ) : (
-                    <>
-                      {groundedSummary && (
-                        <SafeMarkdown
-                          content={groundedSummary}
-                          className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed"
-                        />
-                      )}
-
-                      {/* Mandatory Google Maps Grounding Source Attribution */}
-                      {groundedSources.length > 0 && (
-                        <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-1.5">
-                          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                            Verified Google Maps Sources
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {groundedSources.map((src, idx) => (
-                              <a
-                                key={`${src.uri}-${idx}`}
-                                href={src.uri}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-teal-500 text-[11px] font-bold text-teal-700 dark:text-teal-300 transition-colors"
-                              >
-                                <MapPin className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
-                                <span>{src.title}</span>
-                                <ExternalLink className="w-3 h-3 opacity-70" aria-hidden="true" />
-                              </a>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
+              <div className="px-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <span className="flex items-center gap-3">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-teal-700 inline-block" />
+                    Search Center
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-600 inline-block" />
+                    Healthcare Facility
+                  </span>
+                </span>
+                <span>Map tiles &amp; facility directory © OpenStreetMap contributors</span>
+              </div>
             </div>
 
             {/* Real Facility Cards List */}
@@ -1175,6 +812,13 @@ export const DoctorsNearbyView: React.FC = () => {
                     <span>Live Directory Notice</span>
                   </div>
                   <p>{placesError}</p>
+                  <button
+                    type="button"
+                    onClick={() => setSearchNonce((n) => n + 1)}
+                    className="px-3 py-1.5 rounded-lg bg-rose-600 text-white font-bold text-xs"
+                  >
+                    Retry Lookup
+                  </button>
                 </div>
               )}
 
@@ -1221,15 +865,9 @@ export const DoctorsNearbyView: React.FC = () => {
                               <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-bold">
                                 {place.category}
                               </span>
-                              {typeof place.openNow === 'boolean' && (
-                                <span
-                                  className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                                    place.openNow
-                                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
-                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
-                                  }`}
-                                >
-                                  {place.openNow ? 'Open now' : 'Closed'}
+                              {place.openingHours && (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold">
+                                  {place.openingHours}
                                 </span>
                               )}
                             </div>
@@ -1272,18 +910,6 @@ export const DoctorsNearbyView: React.FC = () => {
                           <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
                             {place.address}
                           </p>
-                        )}
-
-                        {typeof place.rating === 'number' && (
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-300">
-                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" aria-hidden="true" />
-                            <span>{place.rating.toFixed(1)}</span>
-                            {typeof place.userRatingCount === 'number' && (
-                              <span className="text-slate-400 font-normal">
-                                ({place.userRatingCount} reviews)
-                              </span>
-                            )}
-                          </div>
                         )}
 
                         <div className="pt-2 border-t border-slate-200/70 dark:border-slate-800 flex flex-wrap items-center gap-2">

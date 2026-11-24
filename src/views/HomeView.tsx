@@ -268,7 +268,7 @@ export const HomeView: React.FC = () => {
                 {currentUser?.name ? `${t.home.welcomeHeading} — ${currentUser.name}` : t.home.welcomeHeading}
               </span>
               <span className="px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-200 text-[10px] font-semibold border border-teal-400/30 whitespace-nowrap">
-                Encrypted Vault
+                {t.home.encryptedVault}
               </span>
             </h1>
             <p className="text-xs text-teal-100/90 mt-0.5 leading-snug">
@@ -288,13 +288,13 @@ export const HomeView: React.FC = () => {
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <Clock className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-            <span>What can I do next?</span>
+            <span>{t.home.whatNextTitle}</span>
           </h2>
           <button
             onClick={() => setTab('reminders')}
             className="text-xs text-teal-600 dark:text-teal-400 font-bold hover:underline"
           >
-            Manage Reminders
+            {t.home.manageReminders}
           </button>
         </div>
 
@@ -310,9 +310,9 @@ export const HomeView: React.FC = () => {
               </div>
               <div>
                 <span className="font-extrabold text-sm text-slate-900 dark:text-white block group-hover:text-teal-600">
-                  Check symptoms
+                  {t.home.actionSymptomsTitle}
                 </span>
-                <span className="text-[11px] text-slate-500">Triage & self-care</span>
+                <span className="text-[11px] text-slate-500">{t.home.actionSymptomsSub}</span>
               </div>
             </div>
             <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
@@ -329,9 +329,9 @@ export const HomeView: React.FC = () => {
               </div>
               <div>
                 <span className="font-extrabold text-sm text-slate-900 dark:text-white block group-hover:text-purple-600">
-                  Upload report
+                  {t.home.actionReportsTitle}
                 </span>
-                <span className="text-[11px] text-slate-500">Simplify test values</span>
+                <span className="text-[11px] text-slate-500">{t.home.actionReportsSub}</span>
               </div>
             </div>
             <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
@@ -348,9 +348,9 @@ export const HomeView: React.FC = () => {
               </div>
               <div>
                 <span className="font-extrabold text-sm text-slate-900 dark:text-white block group-hover:text-rose-600">
-                  Scan prescription
+                  {t.home.actionRxTitle}
                 </span>
-                <span className="text-[11px] text-slate-500">Extract & set doses</span>
+                <span className="text-[11px] text-slate-500">{t.home.actionRxSub}</span>
               </div>
             </div>
             <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
@@ -367,9 +367,9 @@ export const HomeView: React.FC = () => {
               </div>
               <div>
                 <span className="font-extrabold text-sm text-slate-900 dark:text-white block group-hover:text-emerald-600">
-                  Find doctor
+                  {t.home.actionDoctorsTitle}
                 </span>
-                <span className="text-[11px] text-slate-500">10 km GPS search</span>
+                <span className="text-[11px] text-slate-500">{t.home.actionDoctorsSub}</span>
               </div>
             </div>
             <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />

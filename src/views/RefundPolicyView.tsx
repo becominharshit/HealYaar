@@ -56,7 +56,7 @@ export const RefundPolicyView: React.FC = () => {
               1. No Commercial Transactions or Medicine Sales
             </h2>
             <p>
-              HealYaar does not sell medicines, process pharmacy checkouts, or collect consultation payments. The <strong>Demo Pharmacy Cart</strong> inside the Prescriptions module is strictly an educational simulation and never charges real money or transmits orders to external vendors.
+              HealYaar does not sell medicines, process pharmacy checkouts, or collect consultation payments. The Prescriptions module helps you organize your own uploaded prescriptions and medication schedules privately, and never charges money or transmits commercial orders to vendors.
             </p>
           </section>
 

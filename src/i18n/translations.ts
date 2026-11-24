@@ -74,6 +74,48 @@ export interface Translations {
     badgeAlarms: string;
     badgeDailyLog: string;
     openLabel: string;
+    encryptedVault: string;
+    whatNextTitle: string;
+    manageReminders: string;
+    actionSymptomsTitle: string;
+    actionSymptomsSub: string;
+    actionReportsTitle: string;
+    actionReportsSub: string;
+    actionRxTitle: string;
+    actionRxSub: string;
+    actionDoctorsTitle: string;
+    actionDoctorsSub: string;
+  };
+  fitness: {
+    heroTitle: string;
+    heroBadge: string;
+    activityBadge: string;
+    activityHeading: string;
+    addWater: string;
+    addWalk: string;
+    stepsLabel: string;
+    walkLabel: string;
+    waterLabel: string;
+    saveToday: string;
+    saving: string;
+    recentLogs: string;
+    explorerBadge: string;
+    explorerHeading: string;
+    explorerPlaceholder: string;
+    examplesLabel: string;
+    getGuidanceBtn: string;
+    reviewingBtn: string;
+    catalogHeading: string;
+    catAll: string;
+    catMuscle: string;
+    catBones: string;
+    catHairSkin: string;
+    catGeneral: string;
+    targetArea: string;
+    risksHeading: string;
+    interactionsHeading: string;
+    verifiedSources: string;
+    cautionHeading: string;
   };
   actions: {
     startDemo: string;
@@ -167,7 +209,49 @@ export const translations: Record<'en' | 'hi' | 'mr', Translations> = {
       badgePrivate: 'Private',
       badgeAlarms: 'Alarms',
       badgeDailyLog: 'Daily Log',
-      openLabel: 'Open'
+      openLabel: 'Open',
+      encryptedVault: 'Encrypted Vault',
+      whatNextTitle: 'What can I do next?',
+      manageReminders: 'Manage Reminders',
+      actionSymptomsTitle: 'Check symptoms',
+      actionSymptomsSub: 'Triage & self-care',
+      actionReportsTitle: 'Upload report',
+      actionReportsSub: 'Simplify test values',
+      actionRxTitle: 'Scan prescription',
+      actionRxSub: 'Extract & set doses',
+      actionDoctorsTitle: 'Find doctor',
+      actionDoctorsSub: 'Live care map'
+    },
+    fitness: {
+      heroTitle: 'Fitness, Hydration & Supplements Library',
+      heroBadge: 'Daily Movement & Evidence',
+      activityBadge: 'Daily Activity & Hydration Logger',
+      activityHeading: "Today's Movement & Water Tracker",
+      addWater: '+1 Glass Water',
+      addWalk: '+10 Min Walk',
+      stepsLabel: 'Steps (Goal: 7,000)',
+      walkLabel: 'Walk Minutes (Goal: 30)',
+      waterLabel: 'Water Glasses (Goal: 8)',
+      saveToday: 'Save Today',
+      saving: 'Saving...',
+      recentLogs: 'Recent Activity & Hydration Logs',
+      explorerBadge: 'Nutritional Explorer',
+      explorerHeading: 'Describe Your Problem or Wellness Goal',
+      explorerPlaceholder: "e.g. I want to improve my workout recovery, or I don't get enough protein, or I feel tired during workouts...",
+      examplesLabel: 'Examples:',
+      getGuidanceBtn: 'Get Safe Supplement Guidance',
+      reviewingBtn: 'Reviewing Nutrition Science...',
+      catalogHeading: 'Explore Evidence Ratings by Category:',
+      catAll: 'All',
+      catMuscle: 'Muscle',
+      catBones: 'Bones',
+      catHairSkin: 'Hair & Skin',
+      catGeneral: 'General',
+      targetArea: 'Target Area:',
+      risksHeading: 'Possible Side Effects / Risks:',
+      interactionsHeading: 'Medication Interactions:',
+      verifiedSources: 'Verified Sources:',
+      cautionHeading: 'Medical Caution & Supplement Safety Notice:'
     },
     actions: {
       startDemo: 'Try Sample Journey',
@@ -260,7 +344,49 @@ export const translations: Record<'en' | 'hi' | 'mr', Translations> = {
       badgePrivate: 'गोपनीय',
       badgeAlarms: 'अलार्म',
       badgeDailyLog: 'दैनिक लॉग',
-      openLabel: 'खोलें'
+      openLabel: 'खोलें',
+      encryptedVault: 'एन्क्रिप्टेड वॉल्ट',
+      whatNextTitle: 'मैं आगे क्या कर सकता हूँ?',
+      manageReminders: 'रिमाइंडर प्रबंधित करें',
+      actionSymptomsTitle: 'लक्षण जांचें',
+      actionSymptomsSub: 'तुरंत जांच व देखभाल',
+      actionReportsTitle: 'रिपोर्ट अपलोड करें',
+      actionReportsSub: 'जांच मान सरल भाषा में',
+      actionRxTitle: 'पर्ची स्कैन करें',
+      actionRxSub: 'दवाएं व खुराक जोड़ें',
+      actionDoctorsTitle: 'डॉक्टर खोजें',
+      actionDoctorsSub: 'लाइव नक्शा खोज'
+    },
+    fitness: {
+      heroTitle: 'व्यायाम, हाइड्रेशन और सप्लीमेंट लाइब्रेरी',
+      heroBadge: 'दैनिक गतिविधि व वैज्ञानिक प्रमाण',
+      activityBadge: 'दैनिक गतिविधि और पानी लॉगर',
+      activityHeading: 'आज की गतिविधि और पानी ट्रैकर',
+      addWater: '+1 गिलास पानी',
+      addWalk: '+10 मिनट पैदल',
+      stepsLabel: 'कदम (लक्ष्य: 7,000)',
+      walkLabel: 'पैदल समय - मिनट (लक्ष्य: 30)',
+      waterLabel: 'पानी के गिलास (लक्ष्य: 8)',
+      saveToday: 'आज का लॉग सहेजें',
+      saving: 'सहेजा जा रहा है...',
+      recentLogs: 'हाल की गतिविधि और पानी लॉग',
+      explorerBadge: 'पोषण मार्गदर्शक',
+      explorerHeading: 'अपनी समस्या या स्वास्थ्य लक्ष्य बताएं',
+      explorerPlaceholder: 'उदाहरण: व्यायाम के बाद थकान कम करना, प्रोटीन की कमी, या जोड़ों की मजबूती...',
+      examplesLabel: 'उदाहरण:',
+      getGuidanceBtn: 'सुरक्षित सप्लीमेंट मार्गदर्शन पाएं',
+      reviewingBtn: 'पोषण विज्ञान की समीक्षा हो रही है...',
+      catalogHeading: 'श्रेणी के अनुसार वैज्ञानिक प्रमाण देखें:',
+      catAll: 'सभी',
+      catMuscle: 'मांसपेशियां',
+      catBones: 'हड्डियां',
+      catHairSkin: 'बाल व त्वचा',
+      catGeneral: 'सामान्य',
+      targetArea: 'मुख्य उपयोग:',
+      risksHeading: 'संभावित दुष्प्रभाव / जोखिम:',
+      interactionsHeading: 'दवाओं के साथ परस्पर क्रिया:',
+      verifiedSources: 'प्रमाणित स्रोत:',
+      cautionHeading: 'चिकित्सीय सावधानी और सप्लीमेंट सुरक्षा सूचना:'
     },
     actions: {
       startDemo: 'नमूना यात्रा शुरू करें',
@@ -351,7 +477,49 @@ export const translations: Record<'en' | 'hi' | 'mr', Translations> = {
       badgePrivate: 'खाजगी',
       badgeAlarms: 'अलार्म',
       badgeDailyLog: 'दैनिक नोंद',
-      openLabel: 'उघडा'
+      openLabel: 'उघडा',
+      encryptedVault: 'एन्क्रिप्टेड व्हॉल्ट',
+      whatNextTitle: 'मी पुढे काय करू शकतो?',
+      manageReminders: 'आठवणी व्यवस्थापित करा',
+      actionSymptomsTitle: 'लक्षणे तपासा',
+      actionSymptomsSub: 'तपासणी व घरगुती काळजी',
+      actionReportsTitle: 'अहवाल अपलोड करा',
+      actionReportsSub: 'रिपोर्ट सोप्या भाषेत',
+      actionRxTitle: 'प्रिस्क्रिप्शन स्कॅन करा',
+      actionRxSub: 'औषधे व डोस जतन करा',
+      actionDoctorsTitle: 'डॉक्टर शोधा',
+      actionDoctorsSub: 'लाइव्ह नकाशा शोध'
+    },
+    fitness: {
+      heroTitle: 'व्यायाम, हायड्रेशन आणि सप्लिमेंट लायब्ररी',
+      heroBadge: 'दैनिक हालचाल व शास्त्रीय पुरावे',
+      activityBadge: 'दैनिक हालचाल आणि पाणी नोंद',
+      activityHeading: 'आजची हालचाल आणि पाणी ट्रॅकर',
+      addWater: '+1 ग्लास पाणी',
+      addWalk: '+10 मिनिटे चालणे',
+      stepsLabel: 'पावले (उद्दिष्ट: 7,000)',
+      walkLabel: 'चालण्याची मिनिटे (उद्दिष्ट: 30)',
+      waterLabel: 'पाण्याचे ग्लास (उद्दिष्ट: 8)',
+      saveToday: 'आजची नोंद जतन करा',
+      saving: 'जतन होत आहे...',
+      recentLogs: 'अलीकडील हालचाल व पाणी नोंदी',
+      explorerBadge: 'पोषण मार्गदर्शक',
+      explorerHeading: 'तुमची समस्या किंवा आरोग्य उद्दिष्ट सांगा',
+      explorerPlaceholder: 'उदा. व्यायामानंतर थकवा कमी करणे किंवा प्रथिनांची कमतरता...',
+      examplesLabel: 'उदाहरणे:',
+      getGuidanceBtn: 'सुरक्षित सप्लिमेंट मार्गदर्शन मिळवा',
+      reviewingBtn: 'पोषण शास्त्राची तपासणी सुरू आहे...',
+      catalogHeading: 'श्रेणीनुसार शास्त्रीय पुरावे पहा:',
+      catAll: 'सर्व',
+      catMuscle: 'स्नायू',
+      catBones: 'हाडे',
+      catHairSkin: 'केस व त्वचा',
+      catGeneral: 'सामान्य',
+      targetArea: 'मुख्य उपयोग:',
+      risksHeading: 'संभाव्य दुष्परिणाम / धोके:',
+      interactionsHeading: 'औषधांसोबतचे परिणाम:',
+      verifiedSources: 'प्रमाणित स्रोत:',
+      cautionHeading: 'वैद्यकीय सावधगिरी आणि सप्लिमेंट सुरक्षा सूचना:'
     },
     actions: {
       startDemo: 'प्रवास सुरू करा',
