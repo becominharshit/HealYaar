@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { AnalyzedReportRecord } from '../views/ReportsView';
+import { DEMO_MEDICAL_REPORTS, isDemoUserId } from '../data/demoData';
 
 export const medicalReportService = {
   /**
@@ -8,6 +9,10 @@ export const medicalReportService = {
   async getReports(userId: string): Promise<AnalyzedReportRecord[]> {
     if (!userId) {
       return [];
+    }
+
+    if (isDemoUserId(userId)) {
+      return DEMO_MEDICAL_REPORTS;
     }
 
     if (!isSupabaseConfigured()) {
@@ -54,6 +59,10 @@ export const medicalReportService = {
    * Saves an analyzed medical report
    */
   async saveReport(userId: string, report: AnalyzedReportRecord, fileBlob?: Blob): Promise<AnalyzedReportRecord> {
+    if (isDemoUserId(userId)) {
+      return report;
+    }
+
     let remoteFileUrl = report.fileDataUrl;
     let filePath: string | null = null;
 
@@ -142,7 +151,7 @@ export const medicalReportService = {
    * Deletes a medical report
    */
   async deleteReport(userId: string, reportId: string): Promise<boolean> {
-    if (!userId) return false;
+    if (!userId || isDemoUserId(userId)) return false;
     try {
       const list = this.getLocalReports(userId);
       const updated = list.filter((r) => r.id !== reportId);

@@ -8,7 +8,7 @@ import {
   calculateCycleDetails,
   CycleCalculationResult,
   CyclePhaseInfo
-} from '../services/cycleService';
+} from '../services/periodService';
 import { formatDisplayDate } from '../utils/healthFormatters';
 import {
   CalendarHeart,

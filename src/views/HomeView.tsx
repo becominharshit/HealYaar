@@ -27,13 +27,15 @@ import {
   Bot,
   Clock,
   Calendar,
-  FileText
+  FileText,
+  RefreshCw
 } from 'lucide-react';
 import { NavTab } from '../types';
 import { HealthOverviewIllustration } from '../components/ContextualIllustrations';
 import { Tooltip } from '../components/ui/Tooltip';
 import { medicalReportService } from '../services/medicalReportService';
 import { prescriptionService } from '../services/prescriptionService';
+import { DEMO_SOAP_NOTE } from '../data/demoData';
 import {
   CapsuleTwoTone,
   StethoscopeCurved,
@@ -56,7 +58,8 @@ export const HomeView: React.FC = () => {
     isListening,
     openEmergencyModal,
     reminders,
-    currentUser
+    currentUser,
+    isDemoMode
   } = useApp();
 
   const [quickProblemInput, setQuickProblemInput] = useState('');
@@ -74,25 +77,82 @@ export const HomeView: React.FC = () => {
   // Recent Items Summary
   const [recentReportTitle, setRecentReportTitle] = useState<string | null>(null);
   const [recentRxTitle, setRecentRxTitle] = useState<string | null>(null);
+  const [isLoadingRecentItems, setIsLoadingRecentItems] = useState<boolean>(false);
+  const [recentItemsError, setRecentItemsError] = useState<string | null>(null);
+  const [recentItemsReloadKey, setRecentItemsReloadKey] = useState<number>(0);
 
   useEffect(() => {
     let isMounted = true;
-    if (currentUser?.id) {
-      medicalReportService.getReports(currentUser.id).then((reps) => {
-        if (isMounted && reps && reps.length > 0) {
-          setRecentReportTitle(reps[0].title);
-        }
-      });
-      prescriptionService.getPrescriptions(currentUser.id).then((rxs) => {
-        if (isMounted && rxs && rxs.length > 0) {
-          setRecentRxTitle(rxs[0].doctorName ? `Rx by ${rxs[0].doctorName}` : 'Uploaded Slip');
-        }
-      });
+    const userId = currentUser?.id;
+
+    if (!userId) {
+      setRecentReportTitle(null);
+      setRecentRxTitle(null);
+      setRecentItemsError(null);
+      setIsLoadingRecentItems(false);
+      return () => {
+        isMounted = false;
+      };
     }
+
+    const loadRecentItems = async () => {
+      setIsLoadingRecentItems(true);
+      setRecentItemsError(null);
+      try {
+        const [reportsResult, prescriptionsResult] = await Promise.allSettled([
+          medicalReportService.getReports(userId),
+          prescriptionService.getPrescriptions(userId)
+        ]);
+
+        if (!isMounted) return;
+
+        const failedSources: string[] = [];
+
+        if (reportsResult.status === 'fulfilled') {
+          const reps = reportsResult.value;
+          setRecentReportTitle(reps && reps.length > 0 ? reps[0].title : null);
+        } else {
+          failedSources.push('recent medical reports');
+        }
+
+        if (prescriptionsResult.status === 'fulfilled') {
+          const rxs = prescriptionsResult.value;
+          setRecentRxTitle(
+            rxs && rxs.length > 0
+              ? rxs[0].doctorName
+                ? `Rx by ${rxs[0].doctorName}`
+                : 'Uploaded Slip'
+              : null
+          );
+        } else {
+          failedSources.push('recent prescriptions');
+        }
+
+        if (failedSources.length > 0) {
+          setRecentItemsError(
+            `Could not load your ${failedSources.join(' and ')}. Please check your connection and try again.`
+          );
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        setRecentItemsError(
+          err instanceof Error
+            ? `Could not load your recent health records: ${err.message}`
+            : 'Could not load your recent health records. Please try again.'
+        );
+      } finally {
+        if (isMounted) {
+          setIsLoadingRecentItems(false);
+        }
+      }
+    };
+
+    void loadRecentItems();
+
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, recentItemsReloadKey]);
 
   // Next active reminder (medicine or appointment)
   const nextReminder = reminders.find((r) => r.active);
@@ -283,6 +343,72 @@ export const HomeView: React.FC = () => {
         </div>
       </section>
 
+      {/* DEMO MODE: Instant Clinician SOAP Note Preview Card */}
+      {isDemoMode && (
+        <section
+          aria-label="Demo Clinician SOAP Note Preview"
+          className="relative z-10 rounded-3xl bg-white dark:bg-slate-900 border-2 border-indigo-200 dark:border-indigo-800/80 shadow-sm p-5 sm:p-6 space-y-4"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-100 dark:border-indigo-900/60 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                <Stethoscope className="w-5 h-5" aria-hidden="true" />
+              </div>
+              <div>
+                <h2 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white">
+                  Clinician Copilot SOAP Note Preview (Sample Patient)
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Synthesized from Demo HbA1c Panel (6.3%), Vitamin D (19.2 ng/mL), Lipid Profile &amp; Active Rx
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setTab('assistant')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors"
+              >
+                <span>Open Full SOAP Draft</span>
+                <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('reports')}
+                className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold transition-colors"
+              >
+                Sample Lab Reports
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('medicines')}
+                className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold transition-colors"
+              >
+                Sample Rx
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/70 space-y-1">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                S / O — Subjective &amp; Key Labs
+              </span>
+              <p className="text-slate-700 dark:text-slate-300 leading-relaxed">{DEMO_SOAP_NOTE.subjective}</p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/70 space-y-1">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                A / P — Assessment &amp; Drug Safety Check
+              </span>
+              <p className="text-slate-700 dark:text-slate-300 leading-relaxed">{DEMO_SOAP_NOTE.assessment}</p>
+              <p className="text-rose-700 dark:text-rose-300 font-semibold pt-1">
+                ⚠ {DEMO_SOAP_NOTE.drugInteractionWarnings[0]}
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* 2. "WHAT CAN I DO NEXT?" & UPCOMING REMINDER SUMMARY */}
       <section className="space-y-3 relative z-10">
         <div className="flex items-center justify-between">
@@ -297,6 +423,27 @@ export const HomeView: React.FC = () => {
             {t.home.manageReminders}
           </button>
         </div>
+
+        {recentItemsError && (
+          <div
+            role="alert"
+            className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs sm:text-sm"
+          >
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+              <span className="font-medium">{recentItemsError}</span>
+            </div>
+            <button
+              type="button"
+              disabled={isLoadingRecentItems}
+              onClick={() => setRecentItemsReloadKey((prev) => prev + 1)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-200 font-bold text-xs hover:bg-rose-100 dark:hover:bg-rose-900/60 transition-colors disabled:opacity-50 self-start sm:self-auto whitespace-nowrap"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRecentItems ? 'animate-spin' : ''}`} aria-hidden="true" />
+              <span>{isLoadingRecentItems ? 'Retrying...' : 'Retry'}</span>
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {/* Action 1: Check Symptoms */}
@@ -323,18 +470,22 @@ export const HomeView: React.FC = () => {
             onClick={() => setTab('reports')}
             className="interactive-card p-4 rounded-2xl border border-purple-200/70 dark:border-purple-800/70 bg-white dark:bg-slate-900 hover:border-purple-400 dark:hover:border-purple-500 shadow-2xs text-left flex items-center justify-between group"
           >
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 flex-shrink-0">
                 <FileSpreadsheet className="w-5 h-5" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <span className="font-extrabold text-sm text-slate-900 dark:text-white block group-hover:text-purple-600">
                   {t.home.actionReportsTitle}
                 </span>
-                <span className="text-[11px] text-slate-500">{t.home.actionReportsSub}</span>
+                <span className="text-[11px] text-slate-500 block truncate">
+                  {isLoadingRecentItems
+                    ? 'Loading latest report...'
+                    : recentReportTitle || t.home.actionReportsSub}
+                </span>
               </div>
             </div>
-            <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
+            <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform flex-shrink-0" />
           </button>
 
           {/* Action 3: Review Prescription */}
@@ -342,18 +493,22 @@ export const HomeView: React.FC = () => {
             onClick={() => setTab('medicines')}
             className="interactive-card p-4 rounded-2xl border border-rose-200/70 dark:border-rose-800/70 bg-white dark:bg-slate-900 hover:border-rose-400 dark:hover:border-rose-500 shadow-2xs text-left flex items-center justify-between group"
           >
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 flex-shrink-0">
                 <Pill className="w-5 h-5" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <span className="font-extrabold text-sm text-slate-900 dark:text-white block group-hover:text-rose-600">
                   {t.home.actionRxTitle}
                 </span>
-                <span className="text-[11px] text-slate-500">{t.home.actionRxSub}</span>
+                <span className="text-[11px] text-slate-500 block truncate">
+                  {isLoadingRecentItems
+                    ? 'Loading latest prescription...'
+                    : recentRxTitle || t.home.actionRxSub}
+                </span>
               </div>
             </div>
-            <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
+            <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform flex-shrink-0" />
           </button>
 
           {/* Action 4: Find Doctor */}

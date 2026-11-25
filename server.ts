@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleAiRequest } from './api/ai';
+import { handleHealthRequest } from './api/health';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,12 +12,12 @@ async function startServer() {
   const PORT = Number(process.env.PORT || 3000);
   const isProd = process.env.NODE_ENV === 'production';
 
-  // Parse JSON payloads up to 12MB for medical report / prescription / food image base64 uploads
-  app.use(express.json({ limit: '12mb' }));
+  // Parse JSON payloads up to 6MB so oversized uploads reach handleAiRequest's 413 check cleanly
+  app.use(express.json({ limit: '6mb' }));
 
   // Lightweight health probe
-  app.get('/api/health', (_req, res) => {
-    res.status(200).json({ status: 'ok', service: 'healyaar-api' });
+  app.get('/api/health', (req, res) => {
+    handleHealthRequest(req, res);
   });
 
   // Server-side authenticated Gemini AI proxy

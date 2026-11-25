@@ -67,7 +67,7 @@ export interface ChatMessage {
   poweredBy?: string;
 }
 
-export interface GoogleMapsGroundingSource {
+export interface NearbyCareSource {
   title: string;
   uri: string;
   placeId?: string;

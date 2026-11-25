@@ -6,6 +6,7 @@ import { aiClient } from '../services/aiClient';
 import { FoodPhotoSample, RecipeIngredient, FoodNutrientInfo } from '../types';
 import { parseMealDescription } from '../utils/nutritionParser';
 import { registerBlobUrl, revokeRegisteredBlobUrl } from '../utils/mediaSessionCleanup';
+import { validateVisionFileBeforeUpload } from '../utils/visionUploadHelpers';
 import { SectionHero } from '../components/ui/SectionHero';
 import { NutritionIllustration } from '../components/ContextualIllustrations';
 import {
@@ -199,6 +200,12 @@ export const FoodNutritionView: React.FC = () => {
    * Preserves the user's exact photograph via local Object URL and never fabricates dummy dishes.
    */
   const handleImageFileSelected = async (file: File) => {
+    const sizeCheck = validateVisionFileBeforeUpload(file);
+    if (!sizeCheck.valid) {
+      setConfidenceNote(sizeCheck.error);
+      return;
+    }
+
     if (userImageBlobUrlRef.current) {
       revokeRegisteredBlobUrl(userImageBlobUrlRef.current);
       userImageBlobUrlRef.current = null;

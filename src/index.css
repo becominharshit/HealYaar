@@ -52,7 +52,7 @@
   }
 
   body {
-    font-family: 'Noto Sans', 'Noto Sans Devanagari', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Noto Sans', 'Noto Sans Devanagari', 'Kohinoor Devanagari', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: radial-gradient(circle at 18% 12%, rgba(13, 148, 136, 0.07) 0%, transparent 45%),
                 radial-gradient(circle at 82% 48%, rgba(56, 189, 248, 0.06) 0%, transparent 50%),
                 radial-gradient(circle at 25% 78%, rgba(99, 102, 241, 0.05) 0%, transparent 48%),
@@ -62,6 +62,10 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     min-height: 100vh;
+  }
+
+  .font-devanagari {
+    font-family: 'Noto Sans Devanagari', 'Kohinoor Devanagari', 'Noto Sans', sans-serif;
   }
 
   /* Coherent Global Dark Mode Design System (Deep Charcoal/Navy, intentionally designed) */

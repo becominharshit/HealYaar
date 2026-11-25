@@ -55,7 +55,7 @@ const FAQ_ITEMS = [
 ];
 
 export const LandingView: React.FC = () => {
-  const { setTab, theme, toggleTheme, openEmergencyModal, showToast } = useApp();
+  const { setTab, theme, toggleTheme, openEmergencyModal, showToast, enterDemoMode } = useApp();
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>('rag');
   const [openFaqIdx, setOpenFaqIdx] = useState<number | null>(0);
@@ -98,7 +98,7 @@ export const LandingView: React.FC = () => {
               <span className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white">
                 Heal<span className="text-teal-600 dark:text-teal-400">Yaar</span>
               </span>
-              <span className="hidden sm:inline-block ml-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+              <span className="font-devanagari hidden sm:inline-block ml-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
                 हीलयार
               </span>
             </div>
@@ -177,21 +177,30 @@ export const LandingView: React.FC = () => {
                   HealYaar unites your private health vault with ICMR-NIN &amp; WHO clinical references—delivering cited answers, Clinician SOAP briefs, real interactive nearby care maps, and instant 108 / 112 / 14416 safety guardrails.
                 </p>
 
-                {/* Primary & Secondary CTAs */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-1">
+                {/* Primary, Demo & Secondary CTAs */}
+                <div className="flex flex-wrap items-stretch sm:items-center gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={enterDemoMode}
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm sm:text-base shadow-md transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4" aria-hidden="true" />
+                    <span>Try Live Demo (No Sign-In)</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => navigateToAuth('login')}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-base shadow-md transition-colors"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-bold text-sm sm:text-base shadow-xs transition-colors"
                   >
-                    <span>Log In to Your Health Vault</span>
+                    <span>Log In to Vault</span>
                     <ArrowRight className="w-4 h-4" aria-hidden="true" />
                   </button>
 
                   <button
                     type="button"
                     onClick={() => navigateToAuth('signup')}
-                    className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold text-base border border-slate-300 dark:border-slate-700 transition-colors"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold text-sm sm:text-base border border-slate-300 dark:border-slate-700 transition-colors"
                   >
                     <span>Create Free Account</span>
                   </button>
@@ -205,7 +214,7 @@ export const LandingView: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-2 font-semibold">
                     <Mic className="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0" aria-hidden="true" />
-                    <span>EN / हिन्दी / मराठी Voice</span>
+                    <span className="font-devanagari">EN / हिन्दी / मराठी Voice</span>
                   </div>
                   <div className="flex items-center gap-2 font-semibold">
                     <AlertOctagon className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0" aria-hidden="true" />
@@ -717,8 +726,8 @@ export const LandingView: React.FC = () => {
         </section>
       </main>
 
-      {/* Public Legal Footer (All 4 policies + Contact/Support readable without logging in) */}
-      <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 py-10 px-4 sm:px-6 lg:px-8">
+      {/* Public Legal Footer (All 4 policies + Contact/Support readable without logging in; bottom clearance prevents cookie banner overlap) */}
+      <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 pt-10 pb-44 sm:pb-36 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto space-y-6">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div className="space-y-1">
@@ -727,7 +736,8 @@ export const LandingView: React.FC = () => {
                   <Heart className="w-4 h-4 fill-white/20" aria-hidden="true" />
                 </div>
                 <span className="text-base font-extrabold text-slate-900 dark:text-white">
-                  Heal<span className="text-teal-600 dark:text-teal-400">Yaar</span> (हीलयार)
+                  Heal<span className="text-teal-600 dark:text-teal-400">Yaar</span>{' '}
+                  <span className="font-devanagari">(हीलयार)</span>
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">

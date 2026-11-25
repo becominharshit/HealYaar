@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { SyntheticPrescription } from '../types';
+import { DEMO_PRESCRIPTIONS, isDemoUserId } from '../data/demoData';
 
 export const prescriptionService = {
   /**
@@ -8,6 +9,10 @@ export const prescriptionService = {
   async getPrescriptions(userId: string): Promise<SyntheticPrescription[]> {
     if (!userId) {
       return [];
+    }
+
+    if (isDemoUserId(userId)) {
+      return DEMO_PRESCRIPTIONS;
     }
 
     if (!isSupabaseConfigured()) {
@@ -51,6 +56,10 @@ export const prescriptionService = {
    * Saves a prescription record
    */
   async savePrescription(userId: string, rx: SyntheticPrescription, imageBlob?: Blob): Promise<SyntheticPrescription> {
+    if (isDemoUserId(userId)) {
+      return rx;
+    }
+
     let remoteImageUrl: string | null = null;
     let imagePath: string | null = null;
 
@@ -131,7 +140,7 @@ export const prescriptionService = {
    * Deletes a prescription record
    */
   async deletePrescription(userId: string, prescriptionId: string): Promise<boolean> {
-    if (!userId) return false;
+    if (!userId || isDemoUserId(userId)) return false;
     try {
       const list = this.getLocalPrescriptions(userId);
       const updated = list.filter((r) => r.id !== prescriptionId);

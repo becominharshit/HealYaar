@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { VoiceAssistantProvider } from './context/VoiceAssistantContext';
 import { Navbar } from './components/Navbar';
@@ -10,28 +10,30 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { FloatingBackground, FloatingTheme } from './components/FloatingBackground';
 import { NavTab } from './types';
 
-// Views
+// Eager Landing View for instant first paint
 import { LandingView } from './views/LandingView';
-import { HomeView } from './views/HomeView';
-import { AssistantView } from './views/AssistantView';
-import { SymptomGuidanceView } from './views/SymptomGuidanceView';
-import { ReportsView } from './views/ReportsView';
-import { FoodNutritionView } from './views/FoodNutritionView';
-import { DoctorsNearbyView } from './views/DoctorsNearbyView';
-import { FitnessSupplementsView } from './views/FitnessSupplementsView';
-import { PrescriptionsMedicinesView } from './views/PrescriptionsMedicinesView';
-import { MentalWellbeingView } from './views/MentalWellbeingView';
-import { PeriodTrackerView } from './views/PeriodTrackerView';
-import { RemindersView } from './views/RemindersView';
-import { LoginView } from './views/LoginView';
-import { PrivacyPolicyView } from './views/PrivacyPolicyView';
-import { TermsOfServiceView } from './views/TermsOfServiceView';
-import { CookiesPolicyView } from './views/CookiesPolicyView';
-import { RefundPolicyView } from './views/RefundPolicyView';
 import { EmailVerificationPrompt } from './components/EmailVerificationPrompt';
 import { AuthCallbackRecovery } from './components/AuthCallbackRecovery';
 
-import { Heart, AlertOctagon, Sparkles, Loader2, X } from 'lucide-react';
+// Lazy-loaded non-landing views
+const HomeView = lazy(() => import('./views/HomeView').then((m) => ({ default: m.HomeView })));
+const AssistantView = lazy(() => import('./views/AssistantView').then((m) => ({ default: m.AssistantView })));
+const SymptomGuidanceView = lazy(() => import('./views/SymptomGuidanceView').then((m) => ({ default: m.SymptomGuidanceView })));
+const ReportsView = lazy(() => import('./views/ReportsView').then((m) => ({ default: m.ReportsView })));
+const FoodNutritionView = lazy(() => import('./views/FoodNutritionView').then((m) => ({ default: m.FoodNutritionView })));
+const DoctorsNearbyView = lazy(() => import('./views/DoctorsNearbyView').then((m) => ({ default: m.DoctorsNearbyView })));
+const FitnessSupplementsView = lazy(() => import('./views/FitnessSupplementsView').then((m) => ({ default: m.FitnessSupplementsView })));
+const PrescriptionsMedicinesView = lazy(() => import('./views/PrescriptionsMedicinesView').then((m) => ({ default: m.PrescriptionsMedicinesView })));
+const MentalWellbeingView = lazy(() => import('./views/MentalWellbeingView').then((m) => ({ default: m.MentalWellbeingView })));
+const PeriodTrackerView = lazy(() => import('./views/PeriodTrackerView').then((m) => ({ default: m.PeriodTrackerView })));
+const RemindersView = lazy(() => import('./views/RemindersView').then((m) => ({ default: m.RemindersView })));
+const LoginView = lazy(() => import('./views/LoginView').then((m) => ({ default: m.LoginView })));
+const PrivacyPolicyView = lazy(() => import('./views/PrivacyPolicyView').then((m) => ({ default: m.PrivacyPolicyView })));
+const TermsOfServiceView = lazy(() => import('./views/TermsOfServiceView').then((m) => ({ default: m.TermsOfServiceView })));
+const CookiesPolicyView = lazy(() => import('./views/CookiesPolicyView').then((m) => ({ default: m.CookiesPolicyView })));
+const RefundPolicyView = lazy(() => import('./views/RefundPolicyView').then((m) => ({ default: m.RefundPolicyView })));
+
+import { Heart, AlertOctagon, Sparkles, Loader2, LogIn, Eye } from 'lucide-react';
 
 const EMAIL_VERIFICATION_PROTECTED_TABS: NavTab[] = ['reports', 'medicines', 'period', 'reminders'];
 
@@ -55,6 +57,13 @@ const TAB_THEME_MAP: Record<NavTab, FloatingTheme> = {
   refund: 'home'
 };
 
+const RouteLoadingFallback: React.FC = () => (
+  <div className="min-h-[45vh] flex flex-col items-center justify-center p-8 text-center space-y-3">
+    <Loader2 className="w-7 h-7 text-teal-600 dark:text-teal-400 animate-spin" aria-hidden="true" />
+    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Loading workspace...</p>
+  </div>
+);
+
 const MainLayout: React.FC = () => {
   const {
     tab,
@@ -62,48 +71,14 @@ const MainLayout: React.FC = () => {
     toastMessage,
     openEmergencyModal,
     currentUser,
+    isDemoMode,
+    exitDemoMode,
     isAuthLoading,
     sessionResetNonce,
     logout,
     authCallbackError,
     clearAuthCallbackError
   } = useApp();
-
-  const [quotaBanner, setQuotaBanner] = useState(false);
-
-  useEffect(() => {
-    const onQuotaExceeded = () => setQuotaBanner(true);
-    window.addEventListener('gmp-quota-exceeded', onQuotaExceeded);
-    return () => window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
-  }, []);
-
-  const renderQuotaBanner = () =>
-    quotaBanner ? (
-      <div
-        role="alert"
-        className="sticky top-0 z-50 bg-amber-50 dark:bg-amber-950/95 border-b border-amber-300 dark:border-amber-800 px-4 py-2 text-xs text-amber-950 dark:text-amber-100 flex items-center justify-between gap-3"
-      >
-        <p className="font-medium">
-          Google Maps demo quota exceeded. To lift this limit, configure your own Google Maps Platform billing key.{' '}
-          <a
-            href="https://developers.google.com/maps/documentation/javascript/error-messages?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline font-bold hover:text-amber-700 dark:hover:text-amber-300"
-          >
-            Learn more
-          </a>
-        </p>
-        <button
-          type="button"
-          onClick={() => setQuotaBanner(false)}
-          aria-label="Dismiss Google Maps quota notice"
-          className="p-1 rounded-lg hover:bg-amber-200/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 flex-shrink-0"
-        >
-          <X className="w-4 h-4" aria-hidden="true" />
-        </button>
-      </div>
-    ) : null;
 
   // 1. Session verification loading state: prevent content flash (FOUC)
   if (isAuthLoading) {
@@ -142,29 +117,37 @@ const MainLayout: React.FC = () => {
 
       if (tab === 'privacy') {
         return (
-          <main id="main-content" className="flex-1 relative z-10">
-            <PrivacyPolicyView />
+          <main id="main-content" className="flex-1 relative z-10 pb-36 sm:pb-28">
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <PrivacyPolicyView />
+            </Suspense>
           </main>
         );
       }
       if (tab === 'terms') {
         return (
-          <main id="main-content" className="flex-1 relative z-10">
-            <TermsOfServiceView />
+          <main id="main-content" className="flex-1 relative z-10 pb-36 sm:pb-28">
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <TermsOfServiceView />
+            </Suspense>
           </main>
         );
       }
       if (tab === 'cookies') {
         return (
-          <main id="main-content" className="flex-1 relative z-10">
-            <CookiesPolicyView />
+          <main id="main-content" className="flex-1 relative z-10 pb-36 sm:pb-28">
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <CookiesPolicyView />
+            </Suspense>
           </main>
         );
       }
       if (tab === 'refund') {
         return (
-          <main id="main-content" className="flex-1 relative z-10">
-            <RefundPolicyView />
+          <main id="main-content" className="flex-1 relative z-10 pb-36 sm:pb-28">
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <RefundPolicyView />
+            </Suspense>
           </main>
         );
       }
@@ -173,9 +156,11 @@ const MainLayout: React.FC = () => {
           <div className="min-h-screen flex flex-col bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200 relative">
             <FloatingBackground theme="login" />
             <main id="main-content" className="flex-1 flex flex-col justify-center px-4 sm:px-6 lg:px-8 py-8 relative z-10">
-              <LoginView />
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <LoginView />
+              </Suspense>
             </main>
-            <footer className="border-t border-slate-200/60 dark:border-slate-800/60 py-6 px-4 text-center text-xs text-slate-500 dark:text-slate-400 relative z-10 space-y-2">
+            <footer className="border-t border-slate-200/60 dark:border-slate-800/60 pt-6 pb-44 sm:pb-32 px-4 text-center text-xs text-slate-500 dark:text-slate-400 relative z-10 space-y-2">
               <div className="flex flex-wrap items-center justify-center gap-4 font-semibold">
                 <button type="button" onClick={() => setTab('landing')} className="hover:text-teal-700 dark:hover:text-teal-400 hover:underline">
                   Home
@@ -205,7 +190,6 @@ const MainLayout: React.FC = () => {
 
     return (
       <div className="min-h-screen flex flex-col bg-[#fbfbfa] dark:bg-[#090d16] text-slate-900 dark:text-slate-100">
-        {renderQuotaBanner()}
         <ErrorBoundary onNavigateHome={() => setTab('landing')}>
           {renderPublicView()}
         </ErrorBoundary>
@@ -227,11 +211,11 @@ const MainLayout: React.FC = () => {
     );
   }
 
-  // 3. Authenticated Application Views
+  // 3. Authenticated (or Read-Only Demo) Application Views
   const renderActiveView = () => {
     const requiresVerifiedEmail = EMAIL_VERIFICATION_PROTECTED_TABS.includes(tab);
 
-    if (requiresVerifiedEmail && currentUser && !currentUser.emailConfirmed) {
+    if (!isDemoMode && requiresVerifiedEmail && currentUser && !currentUser.emailConfirmed) {
       return <EmailVerificationPrompt user={currentUser} onSignOut={logout} />;
     }
 
@@ -276,7 +260,6 @@ const MainLayout: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-transparent text-slate-900 dark:text-slate-100 transition-colors duration-200">
-      {renderQuotaBanner()}
       {/* Skip to Main Content Link for Screen Readers & Keyboard Accessibility */}
       <a
         href="#main-content"
@@ -290,6 +273,41 @@ const MainLayout: React.FC = () => {
 
       {/* Main Content & Footer Area Offset Beside Sidebar */}
       <div className="flex-1 flex flex-col md:pl-20 lg:pl-64 xl:pl-72 transition-all duration-200 min-w-0 relative">
+        {/* Subtle Demo Mode Top Banner */}
+        {isDemoMode && (
+          <div
+            role="region"
+            aria-label="Live Demo Mode notice"
+            className="sticky top-[60px] md:top-[57px] z-20 bg-amber-50/95 dark:bg-amber-950/90 backdrop-blur-md border-b border-amber-200 dark:border-amber-800/80 px-4 sm:px-6 lg:px-8 py-2"
+          >
+            <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs text-amber-950 dark:text-amber-100">
+              <div className="flex items-center gap-2 font-semibold">
+                <Eye className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" aria-hidden="true" />
+                <span>
+                  <strong>Live Demo Mode (Read-Only):</strong> Exploring sample lab reports, prescriptions &amp; Clinician SOAP preview.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => exitDemoMode('login')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-2xs transition-colors"
+                >
+                  <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Sign In for Real Storage</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exitDemoMode('landing')}
+                  className="px-2.5 py-1.5 rounded-xl bg-white/80 dark:bg-slate-900/80 hover:bg-white dark:hover:bg-slate-800 border border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-200 font-semibold text-xs transition-colors"
+                >
+                  Exit Demo
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Atmospheric Floating Thematic Background Layer (Changes per page) */}
         <FloatingBackground
           theme={TAB_THEME_MAP[tab] || 'home'}
@@ -299,12 +317,14 @@ const MainLayout: React.FC = () => {
         {/* Main Content View Container (pb-28 ensures floating Voice Assistant never covers controls) */}
         <main id="main-content" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8 pb-28 relative z-10">
           <ErrorBoundary key={`${tab}-${sessionResetNonce}`} onNavigateHome={() => setTab('home')}>
-            {renderActiveView()}
+            <Suspense fallback={<RouteLoadingFallback />}>
+              {renderActiveView()}
+            </Suspense>
           </ErrorBoundary>
         </main>
 
-        {/* Accessible Footer with Legal Links */}
-        <footer className="mt-auto border-t border-white/60 dark:border-slate-800/60 glass-card-subtle backdrop-blur-xl py-8 pb-24 sm:pb-12 px-4 sm:px-6 lg:px-8 text-slate-600 dark:text-slate-400 text-xs sm:text-sm relative z-10">
+        {/* Accessible Footer with Legal Links (generous bottom clearance so cookie banner never overlaps links) */}
+        <footer className="mt-auto border-t border-white/60 dark:border-slate-800/60 glass-card-subtle backdrop-blur-xl pt-8 pb-44 sm:pb-36 px-4 sm:px-6 lg:px-8 text-slate-600 dark:text-slate-400 text-xs sm:text-sm relative z-10">
           <div className="max-w-7xl mx-auto space-y-5">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">

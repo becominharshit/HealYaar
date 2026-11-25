@@ -32,6 +32,11 @@ import {
   getTabForPath,
   resolveAuthorizedTab
 } from '../utils/routePaths';
+import {
+  DEMO_AUTH_USER,
+  DEMO_PERIOD_LOGS,
+  DEMO_REMINDERS
+} from '../data/demoData';
 
 export { PUBLIC_TABS };
 
@@ -113,10 +118,13 @@ interface AppContextType {
   toastMessage: string | null;
   showToast: (msg: string) => void;
 
-  // Authentication Management (Supabase Auth)
+  // Authentication & Guest Demo Management (Supabase Auth)
   authGateState: AuthGateState;
   currentUser: AuthUser | null;
   isAuthenticated: boolean;
+  isDemoMode: boolean;
+  enterDemoMode: () => void;
+  exitDemoMode: (targetTab?: NavTab) => void;
   isAuthLoading: boolean;
   sessionResetNonce: number;
   authCallbackError: { code: string; description: string } | null;
@@ -151,6 +159,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => authService.getStoredUser());
   const currentUserRef = useRef<AuthUser | null>(currentUser);
   currentUserRef.current = currentUser;
+
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
+  const isDemoModeRef = useRef<boolean>(false);
+  isDemoModeRef.current = isDemoMode;
 
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [sessionResetNonce, setSessionResetNonce] = useState<number>(0);
@@ -458,7 +470,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Sync user preferences whenever user alters theme, text scale, language, or contrast
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && !isDemoModeRef.current) {
       userPreferencesService.savePreferences(currentUser.id, {
         theme,
         textSize,
@@ -642,6 +654,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Reminder actions connected to Supabase and Local Fallback (optimistic update for instant UI sync)
   const addReminder = async (rem: Omit<ReminderItem, 'id' | 'createdDate'>) => {
+    if (isDemoModeRef.current) {
+      showToast('Demo Mode is read-only. Sign in to save personal reminders.');
+      return;
+    }
     const tempId = `rem-opt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const optimisticReminder: ReminderItem = {
       id: tempId,
@@ -657,6 +673,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const toggleReminder = async (id: string) => {
+    if (isDemoModeRef.current) {
+      showToast('Demo Mode is read-only. Sign in to modify reminders.');
+      return;
+    }
     const target = reminders.find(r => r.id === id);
     if (!target) return;
     const nextActive = !target.active;
@@ -665,6 +685,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteReminder = async (id: string) => {
+    if (isDemoModeRef.current) {
+      showToast('Demo Mode is read-only. Sign in to manage reminders.');
+      return;
+    }
     setReminders(prev => prev.filter(r => r.id !== id));
     await reminderService.deleteReminder(currentUser?.id || '', id);
     showToast('Reminder deleted.');
@@ -672,6 +696,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Period logs actions connected to Supabase and Local Fallback (optimistic instant updates)
   const savePeriodLog = async (entry: Omit<PeriodCycleEntry, 'id'>) => {
+    if (isDemoModeRef.current) {
+      showToast('Demo Mode is read-only. Sign in to save cycle entries.');
+      return;
+    }
     const tempId = `log-opt-${Date.now()}`;
     const optimisticEntry: PeriodCycleEntry = {
       id: tempId,
@@ -696,6 +724,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updatePeriodLog = async (entry: PeriodCycleEntry) => {
+    if (isDemoModeRef.current) {
+      showToast('Demo Mode is read-only. Sign in to edit cycle entries.');
+      return;
+    }
     setPeriodLogs(prev => prev.map(p => (p.id === entry.id ? entry : p)));
     showToast('Cycle entry updated.');
     const updated = await periodService.updateCycle(currentUser?.id || '', entry);
@@ -712,6 +744,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deletePeriodLog = async (id: string) => {
+    if (isDemoModeRef.current) {
+      showToast('Demo Mode is read-only. Sign in to manage cycle entries.');
+      return;
+    }
     setPeriodLogs(prev => prev.filter(p => p.id !== id));
     showToast('Cycle entry deleted.');
     await periodService.deleteCycle(currentUser?.id || '', id);
@@ -721,10 +757,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deletePeriodLogs = async () => {
+    if (isDemoModeRef.current) {
+      showToast('Demo Mode is read-only. Sign in to manage cycle entries.');
+      return;
+    }
     setPeriodLogs([]);
     await periodService.deleteCycles(currentUser?.id || '');
     showToast('All menstrual cycle logs deleted permanently.');
   };
+
+  // One-click Read-Only Live Demo / Guest Mode
+  const enterDemoMode = useCallback(() => {
+    clearStoredAuthCallbackError();
+    setAuthCallbackError(null);
+    setIsDemoMode(true);
+    isDemoModeRef.current = true;
+    setCurrentUser(DEMO_AUTH_USER);
+    currentUserRef.current = DEMO_AUTH_USER;
+    setReminders(DEMO_REMINDERS);
+    setPeriodLogs(DEMO_PERIOD_LOGS);
+    setIntendedTab(null);
+    applyTab('home', false);
+    showToast('Entered Live Demo Mode (read-only sample health data).');
+  }, [applyTab]);
+
+  const exitDemoMode = useCallback((targetTab: NavTab = 'login') => {
+    try {
+      VoiceService.stopSpeaking();
+      VoiceService.stopListening();
+    } catch {}
+    teardownAllMediaAndBlobs();
+    setIsDemoMode(false);
+    isDemoModeRef.current = false;
+    setCurrentUser(null);
+    currentUserRef.current = null;
+    setReminders([]);
+    setPeriodLogs([]);
+    setIntendedTab(null);
+    setSessionResetNonce((n) => n + 1);
+    applyTab(targetTab, false);
+    try {
+      window.dispatchEvent(new CustomEvent('healyaar_session_reset'));
+    } catch {}
+  }, [applyTab]);
 
   // Authentication Actions
   const login = async (credentials: LoginCredentials): Promise<AuthResult> => {
@@ -732,6 +807,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const result = await authService.login(credentials);
       if (result.success && result.user) {
+        setIsDemoMode(false);
+        isDemoModeRef.current = false;
         setCurrentUser(result.user);
         currentUserRef.current = result.user;
         showToast(`Welcome back to HealYaar, ${result.user.name}!`);
@@ -760,6 +837,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (result.success && result.user) {
         clearStoredAuthCallbackError();
         setAuthCallbackError(null);
+        setIsDemoMode(false);
+        isDemoModeRef.current = false;
         setCurrentUser(result.user);
         currentUserRef.current = result.user;
         showToast(`Welcome to HealYaar, ${result.user.name}!`);
@@ -793,6 +872,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const result = await authService.signup(credentials);
       if (result.success && result.user) {
+        setIsDemoMode(false);
+        isDemoModeRef.current = false;
         setCurrentUser(result.user);
         currentUserRef.current = result.user;
         if (result.user.emailConfirmed) {
@@ -808,6 +889,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = async () => {
+    if (isDemoModeRef.current) {
+      exitDemoMode('login');
+      showToast('Exited Demo Mode. Sign in to store your personal health records.');
+      return;
+    }
+
     isManualLogoutRef.current = true;
     try {
       VoiceService.stopSpeaking();
@@ -888,6 +975,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         authGateState,
         currentUser,
         isAuthenticated: Boolean(currentUser),
+        isDemoMode,
+        enterDemoMode,
+        exitDemoMode,
         isAuthLoading,
         sessionResetNonce,
         authCallbackError,

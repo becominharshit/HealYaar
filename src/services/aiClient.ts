@@ -1,5 +1,8 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { ClinicianSOAPNote, GoogleMapsGroundingSource } from '../types';
+import { ClinicianSOAPNote, NearbyCareSource } from '../types';
+import { prepareVisionPayload } from '../utils/visionUploadHelpers';
+
+export type { NearbyCareSource };
 
 export interface AiChatResponse {
   action: 'chat' | 'soap';
@@ -28,7 +31,8 @@ export interface AiNearbyCareResponse {
   poweredBy: string;
   model: string;
   summaryMarkdown: string;
-  googleMapsSources: GoogleMapsGroundingSource[];
+  nearbyCareSources?: NearbyCareSource[];
+  googleMapsSources?: NearbyCareSource[];
 }
 
 async function getAccessToken(): Promise<string | null> {
@@ -110,11 +114,11 @@ export const aiClient = {
     visionType: 'lab_report' | 'prescription' | 'meal_photo';
     file: File;
   }): Promise<AiVisionResponse<T>> {
-    const base64Data = await fileToBase64(params.file);
+    const { base64Data, mimeType } = await prepareVisionPayload(params.file, fileToBase64);
     return postAiProxy<AiVisionResponse<T>>({
       action: 'vision',
       visionType: params.visionType,
-      mimeType: params.file.type || 'image/jpeg',
+      mimeType,
       fileName: params.file.name,
       base64Data
     });

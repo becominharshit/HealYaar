@@ -19,7 +19,8 @@ import {
   Info,
   Trash2,
   LogOut,
-  Download
+  Download,
+  Sparkles
 } from 'lucide-react';
 
 const DEMO_EMAIL = (import.meta as any).env?.VITE_DEMO_EMAIL || '';
@@ -30,6 +31,8 @@ export const LoginView: React.FC = () => {
   const {
     currentUser,
     isAuthenticated,
+    isDemoMode,
+    enterDemoMode,
     login,
     loginWithGoogle,
     signup,
@@ -382,8 +385,8 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  // If user is already authenticated and visits the Account Details / login page
-  if (isAuthenticated && currentUser) {
+  // If user is already authenticated with a real account and visits the Account Details / login page
+  if (isAuthenticated && currentUser && !isDemoMode) {
     return (
       <div className="max-w-xl mx-auto py-8 sm:py-12 px-4 animate-fade-in space-y-6">
         <div className="interactive-card bg-white dark:bg-slate-900 rounded-3xl p-8 sm:p-10 border border-slate-200/80 dark:border-slate-800 shadow-sm text-center space-y-6">
@@ -1005,6 +1008,18 @@ export const LoginView: React.FC = () => {
                     </>
                   )}
                 </button>
+
+                {(authMode === 'login' || authMode === 'signup') && (
+                  <button
+                    type="button"
+                    onClick={enterDemoMode}
+                    disabled={isSubmitting || isGoogleSubmitting}
+                    className="w-full py-3 px-4 rounded-2xl bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900/60 border border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-200 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4 text-teal-600 dark:text-teal-400" aria-hidden="true" />
+                    <span>Try Live Demo (No Sign-In)</span>
+                  </button>
+                )}
 
                 {authMode === 'login' && HAS_ENV_DEMO && (
                   <button

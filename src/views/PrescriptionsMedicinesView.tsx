@@ -12,6 +12,10 @@ import { aiClient } from '../services/aiClient';
 import { indexPrescription, deleteChunksBySource } from '../services/rag/ragVaultService';
 import { formatDisplayDate } from '../utils/healthFormatters';
 import { registerBlobUrl, revokeRegisteredBlobUrl } from '../utils/mediaSessionCleanup';
+import {
+  validateVisionFileBeforeUpload,
+  VisionUploadValidationError
+} from '../utils/visionUploadHelpers';
 import { VoiceService } from '../services/voiceService';
 import {
   Pill,
@@ -73,6 +77,7 @@ export const PrescriptionsMedicinesView: React.FC = () => {
     reminders,
     setTab,
     currentUser,
+    isDemoMode,
     language
   } = useApp();
 
@@ -90,6 +95,7 @@ export const PrescriptionsMedicinesView: React.FC = () => {
   const [prescriptionHistory, setPrescriptionHistory] = useState<SyntheticPrescription[]>([]);
   const [rxUploadConsent, setRxUploadConsent] = useState<boolean>(false);
   const [rxConsentError, setRxConsentError] = useState<string | null>(null);
+  const [rxUploadError, setRxUploadError] = useState<string | null>(null);
   const [medicineSearch, setMedicineSearch] = useState<string>('');
 
   // Inline manual add/edit medicine state
@@ -259,6 +265,11 @@ export const PrescriptionsMedicinesView: React.FC = () => {
     e.target.value = '';
     if (!file) return;
 
+    if (isDemoMode) {
+      showToast('Demo Mode is read-only. Sign in to upload and save your own prescriptions.');
+      return;
+    }
+
     if (!rxUploadConsent) {
       setRxConsentError(
         'Please confirm consent above before uploading your personal prescription slip.'
@@ -266,6 +277,14 @@ export const PrescriptionsMedicinesView: React.FC = () => {
       return;
     }
     setRxConsentError(null);
+
+    const sizeCheck = validateVisionFileBeforeUpload(file);
+    if (!sizeCheck.valid) {
+      setRxUploadError(sizeCheck.error);
+      setExtractionWarning(null);
+      return;
+    }
+    setRxUploadError(null);
     setExtractionWarning(null);
     setPoweredByModel(null);
 
@@ -356,6 +375,10 @@ export const PrescriptionsMedicinesView: React.FC = () => {
       }
       showToast('Prescription analyzed and saved to your private cabinet.');
     } catch (err) {
+      if (err instanceof VisionUploadValidationError) {
+        setRxUploadError(err.message);
+        return;
+      }
       const msg =
         err instanceof Error
           ? err.message
@@ -396,6 +419,10 @@ export const PrescriptionsMedicinesView: React.FC = () => {
 
   const persistPrescriptionUpdates = async (updatedMeds: PrescriptionMedicine[]) => {
     if (!selectedRx) return;
+    if (isDemoMode) {
+      showToast('Demo Mode is read-only. Sign in to edit or save prescriptions.');
+      return;
+    }
     const updatedRx: SyntheticPrescription = {
       ...selectedRx,
       medicines: updatedMeds
@@ -776,6 +803,16 @@ export const PrescriptionsMedicinesView: React.FC = () => {
                 </button>
               )}
             </div>
+
+            {rxUploadError && (
+              <div
+                role="alert"
+                className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs sm:text-sm font-semibold flex items-start gap-2.5"
+              >
+                <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <span>{rxUploadError}</span>
+              </div>
+            )}
 
             {extractionWarning && (
               <div

@@ -8,6 +8,10 @@ import { authService } from '../services/authService';
 import { aiClient } from '../services/aiClient';
 import { indexMedicalReport, deleteChunksBySource } from '../services/rag/ragVaultService';
 import { formatDisplayDate } from '../utils/healthFormatters';
+import {
+  validateVisionFileBeforeUpload,
+  VisionUploadValidationError
+} from '../utils/visionUploadHelpers';
 import { PortalModal } from '../components/ui/PortalModal';
 import { Tooltip } from '../components/ui/Tooltip';
 import {
@@ -75,7 +79,7 @@ const normalizeMetricStatus = (raw?: string): LabTestMetric['status'] => {
 };
 
 export const ReportsView: React.FC = () => {
-  const { requestPermission, permissions, speakText, stopSpeaking, isAudioPlaying, showToast, currentUser } = useApp();
+  const { requestPermission, permissions, speakText, stopSpeaking, isAudioPlaying, showToast, currentUser, isDemoMode } = useApp();
 
   // Report Page State Machine: 'empty' | 'selected' | 'analyzing' | 'results'
   const [pageState, setPageState] = useState<'empty' | 'selected' | 'analyzing' | 'results'>('empty');
@@ -98,6 +102,7 @@ export const ReportsView: React.FC = () => {
   // First-time document upload consent (unchecked by default until accepted per user)
   const [uploadConsentAccepted, setUploadConsentAccepted] = useState<boolean>(false);
   const [uploadConsentError, setUploadConsentError] = useState<string | null>(null);
+  const [uploadSizeError, setUploadSizeError] = useState<string | null>(null);
 
   // -------------------------------------------------------------
   // Persistent Report History (Supabase & Local)
@@ -116,6 +121,10 @@ export const ReportsView: React.FC = () => {
       medicalReportService.getReports(currentUser.id).then((cloud) => {
         if (isMounted) {
           setReportHistory(cloud);
+          if (isDemoMode && cloud.length > 0) {
+            setActiveReport((prev) => prev || cloud[0]);
+            setPageState('results');
+          }
         }
       });
     } else {
@@ -127,7 +136,7 @@ export const ReportsView: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, isDemoMode]);
 
   useEffect(() => {
     const handleReset = () => {
@@ -142,10 +151,28 @@ export const ReportsView: React.FC = () => {
   }, []);
 
   // File Selection Handlers
+  const acceptSelectedFile = (file: File) => {
+    if (isDemoMode) {
+      showToast('Demo Mode is read-only. Sign in to upload and analyze your own lab reports.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    const check = validateVisionFileBeforeUpload(file);
+    if (!check.valid) {
+      setUploadSizeError(check.error);
+      setSelectedFile(null);
+      setPageState('empty');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    setUploadSizeError(null);
+    setSelectedFile(file);
+    setPageState('selected');
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
-    setSelectedFile(e.target.files[0]);
-    setPageState('selected');
+    acceptSelectedFile(e.target.files[0]);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -161,13 +188,13 @@ export const ReportsView: React.FC = () => {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setSelectedFile(e.dataTransfer.files[0]);
-      setPageState('selected');
+      acceptSelectedFile(e.dataTransfer.files[0]);
     }
   };
 
   const handleRemoveSelection = () => {
     setSelectedFile(null);
+    setUploadSizeError(null);
     setPageState('empty');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -176,11 +203,18 @@ export const ReportsView: React.FC = () => {
   const handleAnalyze = () => {
     if (!selectedFile) return;
 
+    const sizeCheck = validateVisionFileBeforeUpload(selectedFile);
+    if (!sizeCheck.valid) {
+      setUploadSizeError(sizeCheck.error);
+      return;
+    }
+
     if (!uploadConsentAccepted) {
       setUploadConsentError('Please confirm your consent to analyze this medical report before continuing.');
       return;
     }
     setUploadConsentError(null);
+    setUploadSizeError(null);
     if (currentUser?.id) {
       try {
         localStorage.setItem(`healyaar_user_${currentUser.id}_upload_consent_reports`, 'true');
@@ -291,6 +325,11 @@ export const ReportsView: React.FC = () => {
               'AI-extracted educational summary from your uploaded document. Always verify figures against your original laboratory printout and consult a licensed physician.'
           };
         } catch (err) {
+          if (err instanceof VisionUploadValidationError) {
+            setUploadSizeError(err.message);
+            setPageState('selected');
+            return;
+          }
           console.warn('Live vision lab extraction unavailable, saving original document without fabricated values:', err);
         }
       }
@@ -372,6 +411,10 @@ export const ReportsView: React.FC = () => {
 
   const handleDeleteHistoricalReport = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (isDemoMode) {
+      showToast('Demo Mode is read-only. Sign in to manage personal reports.');
+      return;
+    }
     setReportHistory((prev) => prev.filter((r) => r.id !== id));
     if (activeReport?.id === id) {
       setActiveReport(null);
@@ -480,6 +523,16 @@ export const ReportsView: React.FC = () => {
                   onChange={handleFileChange}
                 />
               </label>
+
+              {uploadSizeError && (
+                <div
+                  role="alert"
+                  className="max-w-lg w-full p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs font-semibold flex items-start gap-2 text-left"
+                >
+                  <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                  <span>{uploadSizeError}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -538,6 +591,15 @@ export const ReportsView: React.FC = () => {
                   <p role="alert" className="text-xs font-semibold text-rose-600 dark:text-rose-400">
                     {uploadConsentError}
                   </p>
+                )}
+                {uploadSizeError && (
+                  <div
+                    role="alert"
+                    className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs font-semibold flex items-start gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                    <span>{uploadSizeError}</span>
+                  </div>
                 )}
               </div>
 

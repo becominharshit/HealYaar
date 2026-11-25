@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
 
@@ -15,26 +16,115 @@ interface ApiResponse {
   setHeader: (name: string, value: string) => void;
 }
 
-// Per-user in-memory sliding window rate limiter: 30 requests per 60 seconds
+// Per-user sliding window rate limiter: 30 requests per 60 seconds
+// Uses Upstash Redis REST API when UPSTASH_REDIS_REST_URL & UPSTASH_REDIS_REST_TOKEN are set;
+// falls back to an in-memory map ONLY when persistent Redis env vars are unset.
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 30;
-const userRateLimitBuckets = new Map<string, number[]>();
+export const MAX_VISION_BASE64_LENGTH = 4_200_000;
+const fallbackRateLimitBuckets = new Map<string, number[]>();
 
-function checkRateLimit(userId: string): { allowed: boolean; retryAfterSec: number } {
+export function resetFallbackRateLimiterForTests(): void {
+  fallbackRateLimitBuckets.clear();
+}
+
+function checkInMemoryRateLimit(userId: string): { allowed: boolean; retryAfterSec: number } {
   const now = Date.now();
   const windowStart = now - RATE_LIMIT_WINDOW_MS;
-  const recent = (userRateLimitBuckets.get(userId) || []).filter((ts) => ts > windowStart);
+  const recent = (fallbackRateLimitBuckets.get(userId) || []).filter((ts) => ts > windowStart);
 
   if (recent.length >= RATE_LIMIT_MAX_REQUESTS) {
     const oldest = recent[0] || now;
     const retryAfterSec = Math.max(1, Math.ceil((oldest + RATE_LIMIT_WINDOW_MS - now) / 1000));
-    userRateLimitBuckets.set(userId, recent);
+    fallbackRateLimitBuckets.set(userId, recent);
     return { allowed: false, retryAfterSec };
   }
 
   recent.push(now);
-  userRateLimitBuckets.set(userId, recent);
+  fallbackRateLimitBuckets.set(userId, recent);
   return { allowed: true, retryAfterSec: 0 };
+}
+
+async function checkUpstashRateLimit(
+  userId: string,
+  redisUrl: string,
+  redisToken: string
+): Promise<{ allowed: boolean; retryAfterSec: number }> {
+  const baseUrl = redisUrl.replace(/\/+$/, '');
+  const parsedUrl = new URL(baseUrl);
+  if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+    throw new Error('UPSTASH_REDIS_REST_URL must use https or http protocol.');
+  }
+
+  const now = Date.now();
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  const key = `healyaar:rl:ai:${userId}`;
+  const member = `${now}-${crypto.randomUUID()}`;
+
+  const pipelineCommands = [
+    ['ZREMRANGEBYSCORE', key, '0', String(windowStart)],
+    ['ZADD', key, String(now), member],
+    ['ZCARD', key],
+    ['PEXPIRE', key, String(RATE_LIMIT_WINDOW_MS)],
+    ['ZRANGE', key, '0', '0', 'WITHSCORES']
+  ];
+
+  const response = await fetch(`${baseUrl}/pipeline`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${redisToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(pipelineCommands)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Upstash Redis rate-limit check failed with HTTP ${response.status}.`);
+  }
+
+  const results = (await response.json()) as Array<{ result?: unknown; error?: string }>;
+  if (!Array.isArray(results) || results.length < 5) {
+    throw new Error('Unexpected Upstash Redis pipeline response.');
+  }
+
+  const pipelineError = results.find((entry) => entry && typeof entry.error === 'string');
+  if (pipelineError) {
+    throw new Error(`Upstash Redis error: ${pipelineError.error}`);
+  }
+
+  const count = Number(results[2]?.result ?? 0);
+  if (count > RATE_LIMIT_MAX_REQUESTS) {
+    // Best-effort removal of rejected request so blocked retries do not extend the window
+    void fetch(`${baseUrl}/pipeline`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${redisToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify([['ZREM', key, member]])
+    }).catch(() => {});
+
+    const rangeResult = results[4]?.result;
+    const oldestScore =
+      Array.isArray(rangeResult) && rangeResult.length >= 2 ? Number(rangeResult[1]) : now;
+    const oldest = Number.isFinite(oldestScore) ? oldestScore : now;
+    const retryAfterSec = Math.max(1, Math.ceil((oldest + RATE_LIMIT_WINDOW_MS - now) / 1000));
+    return { allowed: false, retryAfterSec };
+  }
+
+  return { allowed: true, retryAfterSec: 0 };
+}
+
+export async function checkRateLimit(userId: string): Promise<{ allowed: boolean; retryAfterSec: number }> {
+  const upstashUrl = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+
+  if (upstashUrl && upstashToken) {
+    return checkUpstashRateLimit(userId, upstashUrl, upstashToken);
+  }
+
+  // Fallback to in-memory limiter ONLY when persistent Redis env vars are unset
+  return checkInMemoryRateLimit(userId);
 }
 
 function getHeader(headers: ApiRequest['headers'], key: string): string | undefined {
@@ -106,6 +196,17 @@ function sanitizeBase64Payload(raw: string): string {
   return commaIdx >= 0 ? raw.slice(commaIdx + 1) : raw;
 }
 
+export function sanitizeVisionFileName(raw: unknown): string {
+  if (typeof raw !== 'string') return 'upload';
+  const cleaned = raw
+    .replace(/[^a-zA-Z0-9._\- ]/g, '')
+    .replace(/ +/g, ' ')
+    .trim()
+    .slice(0, 80)
+    .trim();
+  return cleaned || 'upload';
+}
+
 export async function handleAiRequest(req: ApiRequest, res: ApiResponse): Promise<void> {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed. Use POST.' });
@@ -119,8 +220,17 @@ export async function handleAiRequest(req: ApiRequest, res: ApiResponse): Promis
     return;
   }
 
-  // 2. Per-user sliding window rate limit
-  const rate = checkRateLimit(auth.userId);
+  // 2. Per-user sliding window rate limit (persistent Upstash Redis or env-gated fallback)
+  let rate: { allowed: boolean; retryAfterSec: number };
+  try {
+    rate = await checkRateLimit(auth.userId);
+  } catch (err) {
+    console.error('[api/ai] Persistent rate-limit check failed:', err);
+    res.status(503).json({
+      error: 'Rate-limiting service is temporarily unavailable. Please try again shortly.'
+    });
+    return;
+  }
   if (!rate.allowed) {
     res.setHeader('Retry-After', String(rate.retryAfterSec));
     res.status(429).json({
@@ -277,8 +387,39 @@ ${clinicalContext || 'Standard WHO / ICMR-NIN educational guidance.'}`;
 
     // -------------------------------------------------------------------------
     // ACTION 2: EMBED (gemini-embedding-2)
+    // Note: gemini-embedding-2 aggregates multiple inputs passed in a single `contents`
+    // array into one combined vector by default, so each RAG chunk MUST be embedded
+    // individually (one string per embedContent call).
     // -------------------------------------------------------------------------
     if (action === 'embed') {
+      if (Array.isArray(body.texts)) {
+        const chunks = body.texts
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0 && item.length <= 8000);
+
+        if (chunks.length === 0 || chunks.length > 20) {
+          res.status(400).json({ error: 'Texts array must contain 1 to 20 chunks (1 to 8000 characters each).' });
+          return;
+        }
+
+        const embeddings: number[][] = [];
+        for (const chunk of chunks) {
+          const result = await ai.models.embedContent({
+            model: 'gemini-embedding-2',
+            contents: chunk
+          });
+          embeddings.push(result.embeddings?.[0]?.values || []);
+        }
+
+        res.status(200).json({
+          action: 'embed',
+          model: 'gemini-embedding-2',
+          embeddings
+        });
+        return;
+      }
+
       const text = typeof body.text === 'string' ? body.text.trim() : '';
       if (!text || text.length > 8000) {
         res.status(400).json({ error: 'Text for embedding must be 1 to 8000 characters.' });
@@ -306,7 +447,7 @@ ${clinicalContext || 'Standard WHO / ICMR-NIN educational guidance.'}`;
       const visionType = body.visionType as 'lab_report' | 'prescription' | 'meal_photo' | undefined;
       const mimeType = typeof body.mimeType === 'string' ? body.mimeType.trim() : '';
       const base64Data = typeof body.base64Data === 'string' ? sanitizeBase64Payload(body.base64Data.trim()) : '';
-      const fileName = typeof body.fileName === 'string' ? body.fileName.slice(0, 200) : 'upload';
+      const fileName = sanitizeVisionFileName(body.fileName);
 
       const allowedMimeTypes = new Set([
         'image/jpeg',
@@ -324,8 +465,15 @@ ${clinicalContext || 'Standard WHO / ICMR-NIN educational guidance.'}`;
         res.status(400).json({ error: 'Unsupported file type. Upload a JPG, PNG, WEBP, or PDF file.' });
         return;
       }
-      if (!base64Data || base64Data.length > 10_000_000) {
-        res.status(400).json({ error: 'File payload missing or exceeds 7MB limit.' });
+      if (!base64Data) {
+        res.status(400).json({ error: 'File payload is missing.' });
+        return;
+      }
+      if (base64Data.length > MAX_VISION_BASE64_LENGTH) {
+        res.status(413).json({
+          error:
+            'File payload exceeds the 4.2 MB encoded upload limit (~3 MB raw). Please compress the image or upload a smaller PDF.'
+        });
         return;
       }
 

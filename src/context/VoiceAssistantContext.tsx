@@ -3,7 +3,7 @@ import { useApp } from './AppContext';
 import { NavTab } from '../types';
 import { VoiceService } from '../services/voiceService';
 import { parseVoiceIntent, VoiceIntent, TAB_LABELS } from '../services/voiceIntentService';
-import { getCycleVoiceResponse } from '../services/cycleService';
+import { getCycleVoiceResponse } from '../services/periodService';
 import {
   HEALYAAR_SECTIONS,
   getWebsiteOverviewSpeech,

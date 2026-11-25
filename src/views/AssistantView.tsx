@@ -28,6 +28,7 @@ import { generateRAGAssistantResponse } from '../services/rag/ragGenerationServi
 import { RAGSourcesBadge } from '../components/RAGSourcesBadge';
 import { RAGVaultModal } from '../components/RAGVaultModal';
 import { getVaultStats } from '../services/rag/ragVaultService';
+import { DEMO_ASSISTANT_MESSAGES } from '../data/demoData';
 
 const DEFAULT_WELCOME_MESSAGE: ChatMessage = {
   id: 'msg-welcome',
@@ -54,7 +55,9 @@ export const AssistantView: React.FC = () => {
     speakText,
     stopSpeaking,
     isAudioPlaying,
-    currentUser
+    currentUser,
+    isDemoMode,
+    showToast
   } = useApp();
 
   const [inputQuery, setInputQuery] = useState('');
@@ -68,8 +71,15 @@ export const AssistantView: React.FC = () => {
 
   const getStorageKey = () => `healyaar_user_${currentUser?.id || 'anonymous'}_chat_history`;
 
-  // Load chat history scoped to current user
+  // Load chat history scoped to current user (or sample Clinician SOAP preview in Demo Mode)
   useEffect(() => {
+    if (isDemoMode) {
+      setCopilotMode('clinician');
+      setMessages(DEMO_ASSISTANT_MESSAGES);
+      setVaultChunkCount(3);
+      return;
+    }
+
     if (!currentUser?.id) {
       setMessages([DEFAULT_WELCOME_MESSAGE]);
       setVaultChunkCount(0);
@@ -93,7 +103,7 @@ export const AssistantView: React.FC = () => {
     }
 
     getVaultStats(currentUser.id).then(stats => setVaultChunkCount(stats.totalChunks));
-  }, [currentUser?.id]);
+  }, [currentUser?.id, isDemoMode]);
 
   // Reset in-memory chat immediately on session reset / sign out
   useEffect(() => {
@@ -108,13 +118,13 @@ export const AssistantView: React.FC = () => {
 
   // Save chat history scoped to current user
   useEffect(() => {
-    if (!currentUser?.id || messages.length === 0) return;
+    if (isDemoMode || !currentUser?.id || messages.length === 0) return;
     try {
       localStorage.setItem(getStorageKey(), JSON.stringify(messages));
     } catch (e) {
       console.warn('Failed to save chat history:', e);
     }
-  }, [messages, currentUser?.id]);
+  }, [messages, currentUser?.id, isDemoMode]);
 
   // Check if a pending voice query or prefill was set by another tab
   useEffect(() => {
@@ -131,6 +141,10 @@ export const AssistantView: React.FC = () => {
 
   const handleUserSubmit = async (userText: string, overrideMode?: 'patient' | 'clinician') => {
     if (!userText.trim()) return;
+    if (isDemoMode) {
+      showToast('Demo Mode is read-only. Sign in to run live Gemini 4 Hydrogen queries.');
+      return;
+    }
     const activeMode = overrideMode || copilotMode;
 
     const userMsg: ChatMessage = {

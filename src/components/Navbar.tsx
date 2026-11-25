@@ -50,6 +50,8 @@ export const Navbar: React.FC = () => {
     toggleTheme,
     currentUser,
     isAuthenticated,
+    isDemoMode,
+    exitDemoMode,
     logout,
     openEmergencyModal,
     isListening,
@@ -264,13 +266,26 @@ export const Navbar: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  void logout();
+                  if (isDemoMode) {
+                    exitDemoMode('login');
+                  } else {
+                    void logout();
+                  }
                 }}
                 className="w-full py-1.5 px-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
-                title="Sign out of your HealYaar account"
+                title={isDemoMode ? 'Sign in for real private storage' : 'Sign out of your HealYaar account'}
               >
-                <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Sign Out</span>
+                {isDemoMode ? (
+                  <>
+                    <LogIn className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" aria-hidden="true" />
+                    <span>Sign In</span>
+                  </>
+                ) : (
+                  <>
+                    <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Sign Out</span>
+                  </>
+                )}
               </button>
             </div>
           )}
@@ -474,27 +489,46 @@ export const Navbar: React.FC = () => {
                       <p className="font-extrabold text-slate-900 dark:text-white break-words">{currentUser.name}</p>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 break-all">{currentUser.email}</p>
                     </div>
+                    {!isDemoMode && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUserDropdownOpen(false);
+                          handleTabClick('login');
+                        }}
+                        className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium flex items-center gap-2 transition-colors"
+                      >
+                        <User className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" aria-hidden="true" />
+                        <span>Account Details</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
                         setUserDropdownOpen(false);
-                        handleTabClick('login');
+                        if (isDemoMode) {
+                          exitDemoMode('login');
+                        } else {
+                          void logout();
+                        }
                       }}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium flex items-center gap-2 transition-colors"
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg font-semibold flex items-center gap-2 transition-colors ${
+                        isDemoMode
+                          ? 'hover:bg-teal-50 dark:hover:bg-teal-950/40 text-teal-700 dark:text-teal-300'
+                          : 'hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400'
+                      }`}
                     >
-                      <User className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" aria-hidden="true" />
-                      <span>Account Details</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUserDropdownOpen(false);
-                        void logout();
-                      }}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-2 transition-colors"
-                    >
-                      <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Sign Out</span>
+                      {isDemoMode ? (
+                        <>
+                          <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Sign In for Real Storage</span>
+                        </>
+                      ) : (
+                        <>
+                          <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Sign Out</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 )}
