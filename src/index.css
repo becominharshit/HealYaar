@@ -68,6 +68,18 @@
     font-family: 'Noto Sans Devanagari', 'Kohinoor Devanagari', 'Noto Sans', sans-serif;
   }
 
+  .font-editorial-sans {
+    font-family: 'Plus Jakarta Sans', 'Noto Sans', 'Noto Sans Devanagari', 'Kohinoor Devanagari', system-ui, -apple-system, sans-serif;
+  }
+
+  .font-editorial-serif {
+    font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+  }
+
+  .font-editorial-mono {
+    font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
   /* Coherent Global Dark Mode Design System (Deep Charcoal/Navy, intentionally designed) */
   html.dark {
     --bg-app: #090d16;
