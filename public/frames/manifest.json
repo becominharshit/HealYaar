@@ -1,0 +1,9 @@
+﻿{
+  "stethoscope-scroll": {
+    "frames": 373,
+    "fps": 48,
+    "path": "/frames/stethoscope-scroll/frame_",
+    "ext": ".webp",
+    "fallbackVideo": "/videos/stethoscope-scroll.mp4"
+  }
+}

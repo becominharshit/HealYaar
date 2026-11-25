@@ -23,6 +23,7 @@
     --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
     --shadow-elevated: 0 10px 25px -5px rgba(15, 23, 42, 0.06), 0 8px 10px -6px rgba(15, 23, 42, 0.03);
     --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-out-expo: cubic-bezier(0.22, 1, 0.36, 1);
     --duration-normal: 200ms;
 
     /* Refined Soft Translucent Healthcare Glass Tokens (Light Mode) */
@@ -49,6 +50,10 @@
     font-size: calc(16px * var(--app-font-scale));
     scroll-behavior: smooth;
     background-color: var(--bg-app);
+  }
+
+  html.lenis-active {
+    scroll-behavior: auto !important;
   }
 
   body {
@@ -78,6 +83,29 @@
 
   .font-editorial-mono {
     font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .font-display {
+    font-family: 'Plus Jakarta Sans', 'Noto Sans Devanagari', system-ui, -apple-system, sans-serif;
+  }
+
+  .font-body {
+    font-family: 'DM Sans', 'Noto Sans Devanagari', 'Noto Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  @supports (corner-shape: squircle) {
+    .squircle {
+      corner-shape: squircle;
+    }
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .landing-card-hover {
+      transition: transform 220ms var(--ease-out-expo), border-color 220ms ease;
+    }
+    .landing-card-hover:hover {
+      transform: translateY(-2px);
+    }
   }
 
   /* Coherent Global Dark Mode Design System (Deep Charcoal/Navy, intentionally designed) */
